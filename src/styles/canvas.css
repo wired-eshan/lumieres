@@ -1,0 +1,329 @@
+/**
+ * Canvas surface, overlay layers and floating canvas controls.
+ *
+ * The overlay layer is transformed by the engine with the camera transform
+ * (translate + scale), so anything inside it is sized in **world units** —
+ * identical numbers to the metrics module. The screen layer is not transformed
+ * and hosts pointer-sized controls that must stay crisp at any zoom.
+ */
+
+.canvas-root {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  touch-action: none;
+}
+
+.canvas-root[data-pan-held='true'] {
+  cursor: grab;
+}
+
+.canvas-surface {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.overlay-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+/* Children opt back into pointer events so the canvas keeps receiving gestures
+   everywhere the editor is not. */
+.overlay-layer > * {
+  pointer-events: auto;
+}
+
+.screen-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.screen-layer > * {
+  pointer-events: auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+/* ------------------------------------------------------------------ */
+/* Floating node toolbar                                               */
+/* ------------------------------------------------------------------ */
+
+.node-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(14px);
+  white-space: nowrap;
+}
+
+.node-toolbar__title {
+  max-width: 190px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: text;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.node-toolbar__title:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.node-toolbar__divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--panel-border);
+}
+
+.node-toolbar__badge {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  min-width: 12px;
+  padding: 0 3px;
+  border-radius: 6px;
+  background: rgba(124, 140, 248, 0.22);
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 12px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Branch action                                                       */
+/* ------------------------------------------------------------------ */
+
+.branch-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.branch-action__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(124, 140, 248, 0.45);
+  border-radius: 9px;
+  background: linear-gradient(180deg, #2c3450, #1d2233);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.branch-action__button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: linear-gradient(180deg, #333d5e, #222842);
+}
+
+.branch-action__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.branch-action__button kbd {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.branch-action__preview {
+  max-width: 260px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(10, 12, 17, 0.78);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-action__limit {
+  color: var(--warning);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Zoom controls                                                       */
+/* ------------------------------------------------------------------ */
+
+.zoom-controls {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 5px;
+  border-radius: 11px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(14px);
+}
+
+.zoom-controls__value {
+  min-width: 52px;
+  height: 30px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.zoom-controls__value:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.zoom-controls__divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 3px;
+  background: var(--panel-border);
+}
+
+/* ------------------------------------------------------------------ */
+/* Minimap                                                             */
+/* ------------------------------------------------------------------ */
+
+.minimap {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 20;
+  padding: 6px;
+  border-radius: 11px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(14px);
+}
+
+.minimap__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px 5px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.minimap__toggle {
+  border: 0;
+  background: none;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.minimap__toggle:hover {
+  color: var(--text);
+}
+
+.minimap__canvas {
+  display: block;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Readout + first-run hint                                            */
+/* ------------------------------------------------------------------ */
+
+.canvas-readout {
+  position: absolute;
+  left: 16px;
+  top: 14px;
+  z-index: 15;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: rgba(10, 12, 17, 0.6);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.first-run-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: var(--shadow-panel);
+  backdrop-filter: blur(14px);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.first-run-hint strong {
+  color: var(--text);
+}
+
+.first-run-hint em {
+  color: var(--accent-strong);
+  font-style: normal;
+  font-weight: 600;
+}

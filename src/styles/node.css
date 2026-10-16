@@ -1,0 +1,220 @@
+/**
+ * The open editor window.
+ *
+ * Every dimension here is expressed in **world units** and comes from the
+ * metrics module via inline styles, because the window lives inside the
+ * camera-transformed overlay layer. Its typography must match the canvas
+ * renderer exactly: when the editor opens over a painted window, no text may
+ * shift by even a pixel.
+ *
+ * The engine, not CSS, writes this element's `transform` (its world position),
+ * so no positioning rules belong here.
+ */
+
+.note-window {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 14px;
+  background: var(--node-fill);
+  border: 1.75px solid var(--accent);
+  box-shadow: 0 0 0 1px rgba(124, 140, 248, 0.18), 0 24px 60px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  contain: layout style;
+}
+
+.note-window__header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 14px;
+  background: var(--node-header);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.note-window__accent {
+  position: absolute;
+  left: 14px;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.note-window__accent.is-root {
+  background: var(--accent-teal);
+}
+
+.note-window__title {
+  flex: 1;
+  min-width: 0;
+  margin-left: 10px;
+  padding: 4px 2px;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.note-window__title::placeholder {
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.note-window__title:focus {
+  outline: none;
+  border-bottom-color: rgba(124, 140, 248, 0.5);
+}
+
+.note-window__actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex: none;
+}
+
+.note-window__actions .icon-button {
+  width: 25px;
+  height: 25px;
+  border-radius: 6px;
+}
+
+/* Source reference chip — the text this branch came from. */
+.note-window__source {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  padding: 0 8px 0 9px;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+}
+
+.note-window__source::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.note-window__source.is-stale::before {
+  background: var(--warning);
+}
+
+.note-window__source-snippet {
+  flex: 1;
+  min-width: 0;
+  /* Keeps the snippet starting where the canvas renderer draws it (x = 27). */
+  padding-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+}
+
+.note-window__source-flag {
+  flex: none;
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.note-window__body {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  resize: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  tab-size: 2;
+}
+
+.note-window__body::placeholder {
+  color: var(--text-faint);
+}
+
+.note-window__body:focus {
+  outline: none;
+}
+
+.note-window__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.note-window__body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+
+.note-window__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.note-window__footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-top: 1px solid var(--node-border);
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.note-window__count.is-warning {
+  color: var(--warning);
+}
+
+.note-window__count.is-full,
+.note-window__count.is-over {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.note-window__count-message {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  color: var(--warning);
+}
+
+.note-window__branches {
+  margin-left: auto;
+  flex: none;
+}
+
+/* Collapsed windows are canvas-only; nothing to style here. */
