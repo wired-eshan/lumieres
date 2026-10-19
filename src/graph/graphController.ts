@@ -11,12 +11,24 @@
  */
 
 import { useGraphStore, type ChangeHint, type GraphStoreState, type SaveStatus } from './graphStore';
-import type { GraphDocument, NodeId, OperationResult, Point, NoteNode, SourceReference } from './types';
+import type {
+  ChatMessage,
+  GraphDocument,
+  NodeId,
+  OperationResult,
+  Point,
+  NoteNode,
+  SourceReference,
+  WindowKind,
+  WindowSize,
+} from './types';
 
 export interface BranchRequest {
   position?: Point;
   title?: string;
   content?: string;
+  kind?: WindowKind;
+  size?: WindowSize;
   sourceReference?: SourceReference | null;
 }
 
@@ -30,6 +42,9 @@ export interface GraphController {
   updateContent(nodeId: NodeId, content: string): OperationResult<{ node: NoteNode }>;
   updateTitle(nodeId: NodeId, title: string): OperationResult<{ node: NoteNode }>;
   moveNodes(positions: Record<NodeId, Point>): OperationResult<null>;
+  resizeNode(nodeId: NodeId, size: WindowSize): OperationResult<{ node: NoteNode }>;
+  setNodeKind(nodeId: NodeId, kind: WindowKind): OperationResult<{ node: NoteNode }>;
+  appendChatMessage(nodeId: NodeId, message: ChatMessage): OperationResult<{ node: NoteNode }>;
   setCollapsed(nodeId: NodeId, collapsed: boolean): OperationResult<{ node: NoteNode }>;
   deleteSubtree(nodeId: NodeId): OperationResult<{ removedCount: number; parentId: NodeId | null }>;
   resetCanvas(): void;
@@ -83,6 +98,9 @@ export function createGraphController(): GraphController {
     },
     updateTitle: (nodeId, title) => useGraphStore.getState().updateTitle(nodeId, title),
     moveNodes: (positions) => useGraphStore.getState().moveNodes(positions),
+    resizeNode: (nodeId, size) => useGraphStore.getState().resizeNode(nodeId, size),
+    setNodeKind: (nodeId, kind) => useGraphStore.getState().setNodeKind(nodeId, kind),
+    appendChatMessage: (nodeId, message) => useGraphStore.getState().appendChatMessage(nodeId, message),
     setCollapsed: (nodeId, collapsed) => useGraphStore.getState().setCollapsed(nodeId, collapsed),
     deleteSubtree: (nodeId) => useGraphStore.getState().deleteSubtree(nodeId),
     resetCanvas: () => useGraphStore.getState().resetCanvas(),

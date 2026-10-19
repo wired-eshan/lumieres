@@ -13,6 +13,7 @@
 
 import { create } from 'zustand';
 import {
+  appendChatMessage as appendChatMessageOp,
   createBranch,
   createEmptyDocument,
   deleteSubtree,
@@ -20,8 +21,10 @@ import {
   getNode,
   moveNodes as moveNodesOp,
   resetCanvas as resetCanvasOp,
+  resizeNode as resizeNodeOp,
   setDocumentTitle,
   setNodeCollapsed,
+  setNodeKind as setNodeKindOp,
   updateNodeContent,
   updateNodeTitle,
 } from './graphOperations';
@@ -36,12 +39,15 @@ import {
 } from './history';
 import { canonicalChildPosition } from './layout';
 import type {
+  ChatMessage,
   GraphDocument,
   NodeId,
   NoteNode,
   OperationResult,
   Point,
   SourceReference,
+  WindowKind,
+  WindowSize,
 } from './types';
 
 export type SaveStatus = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
@@ -61,6 +67,8 @@ export interface AddBranchInput {
   position?: Point;
   title?: string;
   content?: string;
+  kind?: WindowKind;
+  size?: WindowSize;
   sourceReference?: SourceReference | null;
 }
 
@@ -78,6 +86,9 @@ export interface GraphStoreState {
   updateContent: (nodeId: NodeId, content: string) => OperationResult<{ node: NoteNode }>;
   updateTitle: (nodeId: NodeId, title: string) => OperationResult<{ node: NoteNode }>;
   moveNodes: (positions: Record<NodeId, Point>) => OperationResult<null>;
+  resizeNode: (nodeId: NodeId, size: WindowSize) => OperationResult<{ node: NoteNode }>;
+  setNodeKind: (nodeId: NodeId, kind: WindowKind) => OperationResult<{ node: NoteNode }>;
+  appendChatMessage: (nodeId: NodeId, message: ChatMessage) => OperationResult<{ node: NoteNode }>;
   setCollapsed: (nodeId: NodeId, collapsed: boolean) => OperationResult<{ node: NoteNode }>;
   deleteSubtree: (nodeId: NodeId) => OperationResult<{ removedCount: number; parentId: NodeId | null }>;
   resetCanvas: () => void;
@@ -129,6 +140,8 @@ export const useGraphStore = create<GraphStoreState>((set, get) => {
         position,
         title: input.title ?? '',
         content: input.content ?? '',
+        kind: input.kind ?? 'note',
+        ...(input.size !== undefined ? { size: input.size } : {}),
         sourceReference: input.sourceReference ?? null,
       });
       if (!result.ok) return result;
@@ -248,6 +261,60 @@ export const useGraphStore = create<GraphStoreState>((set, get) => {
       return { ok: true, value: { node: result.value.node } };
     },
 
+    resizeNode: (nodeId, size) => {
+      const state = get();
+      const before = getNode(state.doc, nodeId);
+      if (!before) return { ok: false, code: 'NODE_NOT_FOUND', message: 'That window no longer exists.' };
+
+      const result = resizeNodeOp(state.doc, nodeId, size);
+      if (!result.ok) return result;
+      if (result.value.doc === state.doc) return { ok: true, value: { node: result.value.node } };
+
+      const patch: Patch = {
+        kind: 'update',
+        nodeId,
+        before: { size: { ...before.size }, updatedAt: before.updatedAt },
+        after: { size: { ...result.value.node.size }, updatedAt: result.value.node.updatedAt },
+        label: 'Resize window',
+      };
+      commit(result.value.doc, patch, hint({ ids: [nodeId] }));
+      return { ok: true, value: { node: result.value.node } };
+    },
+
+    setNodeKind: (nodeId, kind) => {
+      const state = get();
+      const before = getNode(state.doc, nodeId);
+      if (!before) return { ok: false, code: 'NODE_NOT_FOUND', message: 'That window no longer exists.' };
+
+      const result = setNodeKindOp(state.doc, nodeId, kind);
+      if (!result.ok) return result;
+      if (result.value.doc === state.doc) return { ok: true, value: { node: result.value.node } };
+
+      const patch: Patch = {
+        kind: 'update',
+        nodeId,
+        before: { kind: before.kind, size: { ...before.size }, updatedAt: before.updatedAt },
+        after: {
+          kind: result.value.node.kind,
+          size: { ...result.value.node.size },
+          updatedAt: result.value.node.updatedAt,
+        },
+        label: kind === 'ai' ? 'Switch to AI chat' : 'Switch to note',
+      };
+      commit(result.value.doc, patch, hint({ ids: [nodeId] }));
+      return { ok: true, value: { node: result.value.node } };
+    },
+
+    appendChatMessage: (nodeId, message) => {
+      const state = get();
+      const result = appendChatMessageOp(state.doc, nodeId, message);
+      if (!result.ok) return result;
+
+      // Chat turns are not pushed onto the undo stack (see `appendChatMessage`).
+      commit(result.value.doc, null, hint({ ids: [nodeId] }));
+      return { ok: true, value: { node: result.value.node } };
+    },
+
     deleteSubtree: (nodeId) => {
       const state = get();
       const result = deleteSubtree(state.doc, nodeId);
@@ -261,7 +328,7 @@ export const useGraphStore = create<GraphStoreState>((set, get) => {
           edges: result.value.removedEdges,
           label:
             result.value.removedNodes.length > 1
-              ? `Delete ${result.value.removedNodes.length} notes`
+              ? `Delete ${result.value.removedNodes.length} windows`
               : 'Delete note',
         },
         hint({

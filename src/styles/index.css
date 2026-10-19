@@ -23,6 +23,7 @@
   --accent: #7c8cf8;
   --accent-strong: #93a1ff;
   --accent-soft: rgba(124, 140, 248, 0.14);
+  --accent-ai: #b79cff;
   --accent-teal: #5fd3bd;
   --danger: #f2686b;
   --warning: #f0b35e;
@@ -239,6 +240,21 @@ textarea {
 
 .button.is-danger:hover {
   background: rgba(242, 104, 107, 0.26);
+}
+
+.button.is-primary {
+  border-color: rgba(124, 140, 248, 0.5);
+  background: rgba(124, 140, 248, 0.22);
+  color: #eef0ff;
+}
+
+.button.is-primary:hover {
+  background: rgba(124, 140, 248, 0.34);
+}
+
+.button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .link-button {

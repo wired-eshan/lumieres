@@ -36,6 +36,149 @@
   padding: 22px 24px 26px;
 }
 
+.modal.is-settings {
+  width: min(520px, 100%);
+}
+
+/* ------------------------------------------------------------------ */
+/* AI settings                                                         */
+/* ------------------------------------------------------------------ */
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.settings__intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  background: rgba(183, 156, 255, 0.08);
+  border: 1px solid rgba(183, 156, 255, 0.2);
+}
+
+.settings__intro p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.settings__mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  background: rgba(183, 156, 255, 0.14);
+  color: var(--accent-ai);
+}
+
+.settings__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings__label {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.settings__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings__load {
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.settings__key-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings__input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.settings__input:focus {
+  outline: none;
+  border-color: var(--accent-ai);
+}
+
+.settings__reveal {
+  flex: none;
+  height: 36px;
+}
+
+.settings__hint {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.settings__hint a {
+  color: var(--accent-strong);
+  text-decoration: none;
+}
+
+.settings__hint a:hover {
+  text-decoration: underline;
+}
+
+.settings__hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 11px;
+}
+
+.settings__hint.is-error,
+.settings__status.is-error {
+  color: #ffb3b4;
+}
+
+.settings__status {
+  min-height: 17px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.settings__actions {
+  margin-top: 4px;
+  align-items: center;
+}
+
+.settings__clear {
+  margin-right: auto;
+  border-color: rgba(242, 104, 107, 0.35);
+  color: #ffd9da;
+}
+
+.settings__clear:hover {
+  background: rgba(242, 104, 107, 0.16);
+}
+
 .modal__header {
   display: flex;
   align-items: center;

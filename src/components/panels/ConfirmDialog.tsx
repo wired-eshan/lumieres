@@ -20,14 +20,26 @@ export function ConfirmDialog(): ReactNode {
     if (pending) cancelRef.current?.focus();
   }, [pending]);
 
+  useEffect(() => {
+    if (!pending) return;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        engine.cancelPendingAction();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [engine, pending]);
+
   if (!pending) return null;
 
   const isReset = pending.kind === 'reset';
   const title = isReset
     ? 'Reset this canvas?'
     : pending.nodeCount > 1
-      ? `Delete ${formatCount(pending.nodeCount)} notes?`
-      : 'Delete this note?';
+      ? `Delete ${formatCount(pending.nodeCount)} windows?`
+      : 'Delete this window?';
 
   return (
     <div className="modal-backdrop" data-overlay="true" role="presentation">
@@ -44,18 +56,18 @@ export function ConfirmDialog(): ReactNode {
         <div className="modal__body" id="confirm-body">
           {isReset ? (
             <p>
-              Every note on this canvas will be removed and replaced with a single empty root note.
+              Every window on this canvas will be removed and replaced with a single empty root note.
               One undo brings the whole canvas back.
             </p>
           ) : (
             <p>
-              This removes the note and everything branching from it. Nothing else on the canvas is
+              This removes the window and everything branching from it. Nothing else on the canvas is
               affected.
             </p>
           )}
           <ul className="modal__facts">
             <li>
-              <strong>{formatCount(pending.nodeCount)}</strong> note{pending.nodeCount === 1 ? '' : 's'}
+              <strong>{formatCount(pending.nodeCount)}</strong> window{pending.nodeCount === 1 ? '' : 's'}
             </li>
             <li>
               <strong>{formatCount(pending.characterCount)}</strong> characters of text

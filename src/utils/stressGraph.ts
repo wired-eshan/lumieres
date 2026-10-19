@@ -83,7 +83,7 @@ export function createStressGraph(options: StressGraphOptions = {}): GraphDocume
     now,
   });
   nodes[root.id] = root;
-  grid.insert(root.id, { ...root.position, ...nodeSize(false) });
+  grid.insert(root.id, { ...root.position, ...nodeSize(root.collapsed, root.size) });
 
   // Breadth-first so every node fills its quota before the next level starts.
   const queue: NoteNode[] = [root];
@@ -114,7 +114,7 @@ export function createStressGraph(options: StressGraphOptions = {}): GraphDocume
         targetNodeId: node.id,
       };
       edges[edge.id] = edge;
-      grid.insert(node.id, { ...position, ...nodeSize(false) });
+      grid.insert(node.id, { ...position, ...nodeSize(node.collapsed, node.size) });
 
       childCounts.set(parent.id, index + 1);
       queue.push(node);

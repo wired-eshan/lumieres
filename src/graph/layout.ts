@@ -14,7 +14,7 @@
  *     until a free spot is found.
  */
 
-import { BRANCH_GAP_X, BRANCH_GAP_Y, nodeSize } from './metrics';
+import { BRANCH_GAP_X, BRANCH_GAP_Y, defaultNodeSize, nodeSize } from './metrics';
 import type { NodeId, NoteNode, Point, Rect } from './types';
 
 export interface OccupancyQuery {
@@ -22,8 +22,8 @@ export interface OccupancyQuery {
   (rect: Rect, ignoreId?: NodeId): boolean;
 }
 
-const STEP_X = nodeSize(false).width + BRANCH_GAP_X;
-const STEP_Y = nodeSize(false).height + BRANCH_GAP_Y;
+const STEP_X = defaultNodeSize('note').width + BRANCH_GAP_X;
+const STEP_Y = defaultNodeSize('note').height + BRANCH_GAP_Y;
 
 /**
  * Vertical offset of the n-th child relative to its parent's top edge.
@@ -37,7 +37,9 @@ export function slotOffsetForIndex(index: number): number {
 }
 
 export function canonicalChildPosition(parent: NoteNode, index: number): Point {
-  const parentWidth = nodeSize(parent.collapsed).width;
+  // Placement follows the parent's real width, so resizing a window does not
+  // make its next branch overlap the frame.
+  const parentWidth = nodeSize(parent.collapsed, parent.size).width;
   return {
     x: parent.position.x + parentWidth + BRANCH_GAP_X,
     y: parent.position.y + slotOffsetForIndex(index),
@@ -76,7 +78,7 @@ export function resolveChildPosition(
   parent: NoteNode,
   index: number,
   isOccupied: OccupancyQuery,
-  size: { width: number; height: number } = nodeSize(false),
+  size: { width: number; height: number } = defaultNodeSize('note'),
 ): Point {
   const preferred = canonicalChildPosition(parent, index);
   for (const candidate of candidatePositions(preferred)) {
@@ -94,7 +96,7 @@ export function boundsOf(nodes: NoteNode[]): Rect | null {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const node of nodes) {
-    const size = nodeSize(node.collapsed);
+    const size = nodeSize(node.collapsed, node.size);
     minX = Math.min(minX, node.position.x);
     minY = Math.min(minY, node.position.y);
     maxX = Math.max(maxX, node.position.x + size.width);

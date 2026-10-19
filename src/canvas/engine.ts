@@ -29,7 +29,10 @@ import {
   type Point,
   type Rect,
   type SourceReference,
+  type WindowKind,
+  type WindowSize,
 } from '../graph/types';
+import { clampNodeSize } from '../graph/metrics';
 import { boundsOf, resolveChildPosition } from '../graph/layout';
 import { nodeSize } from '../graph/metrics';
 import type { ChangeHint } from '../graph/graphStore';
@@ -68,6 +71,8 @@ export interface BranchActionState {
   text: string;
   start: number;
   end: number;
+  /** Set when the selection lives in an AI message rather than the note body. */
+  sourceMessageId?: string;
   /** World-space anchor the floating button hangs from. */
   anchor: Point;
 }
@@ -117,7 +122,19 @@ interface MarqueeGesture {
   baseSelection: NodeId[];
 }
 
-type Gesture = PanGesture | DragGesture | MarqueeGesture | null;
+/** Resizing a painted (not currently open) window from its bottom-right corner. */
+interface ResizeGesture {
+  kind: 'resize-node';
+  nodeId: NodeId;
+  startWorld: Point;
+  startSize: WindowSize;
+  moved: boolean;
+}
+
+type Gesture = PanGesture | DragGesture | MarqueeGesture | ResizeGesture | null;
+
+/** World-unit corner zone that starts a canvas resize gesture. */
+const RESIZE_CORNER = 20;
 
 export interface MountTargets {
   canvas: HTMLCanvasElement;
@@ -141,14 +158,23 @@ export class CanvasEngine {
 
   private gesture: Gesture = null;
   private draftPositions = new Map<NodeId, Point>();
+  /** In-flight resize sizes, kept out of the document until pointer-up. */
+  private draftSizes = new Map<NodeId, WindowSize>();
   private selected = new Set<NodeId>();
   private hoveredId: NodeId | null = null;
+  /** Pointer is over the resize corner of a selected window. */
+  private hoverResize = false;
   private editingId: NodeId | null = null;
   private branchAction: BranchActionState | null = null;
   /** Reads the live selection from the open editor; registered by NoteWindow. */
   private selectionResolver: (() => BranchActionState | null) | null = null;
   /** The range the last branch consumed, so one selection cannot branch twice. */
-  private consumedSelection: { nodeId: NodeId; start: number; end: number } | null = null;
+  private consumedSelection: {
+    nodeId: NodeId;
+    start: number;
+    end: number;
+    sourceMessageId?: string;
+  } | null = null;
   private pendingAction: PendingAction | null = null;
   private toast: ToastState | null = null;
   private marquee: Rect | null = null;
@@ -189,6 +215,7 @@ export class CanvasEngine {
     this.canvas = targets.canvas;
     this.ctx = targets.canvas.getContext('2d', { alpha: false });
     this.overlayLayer = targets.overlayLayer;
+    this.applyCursor();
     this.scheduleDraw();
   }
 
@@ -245,7 +272,19 @@ export class CanvasEngine {
 
   private emit(): void {
     this.snapshot = this.buildSnapshot();
+    this.applyCursor();
     for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Cursor feedback is written straight to the canvas element rather than
+   * mirrored through React: hover changes are frequent, and the open editor's
+   * subtree should not re-render just because the pointer moved.
+   */
+  private applyCursor(): void {
+    if (!this.canvas) return;
+    const value = this.snapshot.cursor === 'default' ? '' : this.snapshot.cursor;
+    if (this.canvas.style.cursor !== value) this.canvas.style.cursor = value;
   }
 
   /** Emits at most ~10×/s while zooming so the readout stays live without churn. */
@@ -271,13 +310,15 @@ export class CanvasEngine {
       for (const id of change.removed) {
         this.index.remove(id);
         this.draftPositions.delete(id);
+        this.draftSizes.delete(id);
         textLayoutCache.invalidate(`node:${id}`);
       }
       for (const id of [...change.added, ...change.ids]) {
         const node = doc.nodes[id];
         if (!node) continue;
         const position = this.draftPositions.get(id) ?? node.position;
-        this.index.update(id, nodeRectAt(position, node.collapsed));
+        const size = this.draftSizes.get(id) ?? node.size;
+        this.index.update(id, nodeRectAt(position, node.collapsed, size));
       }
     }
 
@@ -302,7 +343,15 @@ export class CanvasEngine {
   private rebuildIndex(): void {
     this.index.rebuild(
       Object.values(this.doc.nodes).map(
-        (node) => [node.id, nodeRectAt(node.position, node.collapsed)] as const,
+        (node) =>
+          [
+            node.id,
+            nodeRectAt(
+              node.position,
+              node.collapsed,
+              this.draftSizes.get(node.id) ?? node.size,
+            ),
+          ] as const,
       ),
     );
   }
@@ -352,6 +401,7 @@ export class CanvasEngine {
       camera: this.camera,
       viewport: this.viewport,
       draftPositions: this.draftPositions,
+      draftSizes: this.draftSizes,
       selectedIds: this.selected,
       hoveredId: this.hoveredId,
       editingNodeId: this.editingId,
@@ -393,7 +443,7 @@ export class CanvasEngine {
     const node = this.doc.nodes[id];
     if (!node) return null;
     const position = this.draftPositions.get(id) ?? node.position;
-    const size = nodeSize(node.collapsed);
+    const size = nodeSize(node.collapsed, this.draftSizes.get(id) ?? node.size);
     return { x: position.x + size.width / 2, y: position.y };
   }
 
@@ -402,7 +452,7 @@ export class CanvasEngine {
     const node = this.doc.nodes[id];
     if (!node) return null;
     const position = this.draftPositions.get(id) ?? node.position;
-    const size = nodeSize(node.collapsed);
+    const size = nodeSize(node.collapsed, this.draftSizes.get(id) ?? node.size);
     return { x: position.x, y: position.y, width: size.width, height: size.height };
   }
 
@@ -507,6 +557,58 @@ export class CanvasEngine {
   registerBranchElement(el: HTMLElement | null): void {
     this.branchEl = el;
     this.scheduleDraw();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Resizing                                                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * Applies an in-flight resize without touching the document, so dragging a
+   * corner stays at pointer speed. The spatial index and the edge geometry are
+   * updated here, which is what keeps a branch attached while the frame grows.
+   */
+  setDraftNodeSize(id: NodeId, size: WindowSize): void {
+    const node = this.doc.nodes[id];
+    if (!node) return;
+    const clamped = clampNodeSize(size);
+    this.draftSizes.set(id, clamped);
+    const position = this.draftPositions.get(id) ?? node.position;
+    this.index.update(id, nodeRectAt(position, node.collapsed, clamped));
+    this.scheduleDraw();
+  }
+
+  /** Commits the resize as one document update (and one undo step). */
+  commitDraftNodeSize(id: NodeId): void {
+    const size = this.draftSizes.get(id);
+    this.draftSizes.delete(id);
+    if (!size) {
+      this.scheduleDraw();
+      return;
+    }
+    const result = this.controller.resizeNode(id, size);
+    if (!result.ok) {
+      this.notify(result.message, 'error');
+      this.rebuildIndex();
+    }
+    this.scheduleDraw();
+  }
+
+  cancelDraftNodeSize(id: NodeId): void {
+    if (!this.draftSizes.delete(id)) return;
+    this.rebuildIndex();
+    this.scheduleDraw();
+  }
+
+  /** Switches a window between note and AI conversation. */
+  setNodeKind(id: NodeId, kind: WindowKind): void {
+    const node = this.doc.nodes[id];
+    if (!node || node.kind === kind) return;
+    this.flushDraft({ immediate: true });
+    this.clearBranchActionFor(id);
+    this.consumedSelection = null;
+    const result = this.controller.setNodeKind(id, kind);
+    if (!result.ok) this.notify(result.message, 'error');
   }
 
   /**
@@ -621,10 +723,26 @@ export class CanvasEngine {
   private updateHover(screenPoint: Point): void {
     if (this.gesture) return;
     const next = this.hitTest(screenPoint);
-    if (next === this.hoveredId) return;
+    const node = next ? this.doc.nodes[next] : null;
+    const resize =
+      next !== null && node != null && !node.collapsed && this.selected.has(next)
+        ? this.isResizeCorner(next, this.screenToWorld(screenPoint))
+        : false;
+    if (next === this.hoveredId && resize === this.hoverResize) return;
     this.hoveredId = next;
+    this.hoverResize = resize;
     this.emit();
     this.scheduleDraw();
+  }
+
+  /** Whether a world point falls in the bottom-right resize corner of a window. */
+  private isResizeCorner(id: NodeId, world: Point): boolean {
+    const rect = this.nodeWorldRect(id);
+    if (!rect) return false;
+    return (
+      world.x >= rect.x + rect.width - RESIZE_CORNER &&
+      world.y >= rect.y + rect.height - RESIZE_CORNER
+    );
   }
 
   /* ---------------------------------------------------------------- */
@@ -667,6 +785,29 @@ export class CanvasEngine {
 
     const node = this.doc.nodes[hitId];
     if (!node) return;
+
+    // The bottom-right corner of an already-selected painted window resizes it.
+    // The open editor has its own DOM handle, so this path is for every window
+    // the user is not currently editing.
+    if (
+      !options.additive &&
+      !node.collapsed &&
+      this.selected.has(hitId) &&
+      this.isResizeCorner(hitId, world)
+    ) {
+      if (this.editingId && this.editingId !== hitId) this.stopEditing({ commit: true });
+      this.flushDraft({ immediate: true });
+      this.gesture = {
+        kind: 'resize-node',
+        nodeId: hitId,
+        startWorld: world,
+        startSize: { ...node.size },
+        moved: false,
+      };
+      this.continuous = true;
+      this.emit();
+      return;
+    }
 
     if (options.additive) {
       this.toggleSelection(hitId);
@@ -722,6 +863,25 @@ export class CanvasEngine {
       return;
     }
 
+    if (gesture.kind === 'resize-node') {
+      const world = this.screenToWorld(screen);
+      const dx = world.x - gesture.startWorld.x;
+      const dy = world.y - gesture.startWorld.y;
+      if (!gesture.moved && Math.abs(dx) + Math.abs(dy) < 1) return;
+      gesture.moved = true;
+      const node = this.doc.nodes[gesture.nodeId];
+      if (!node) return;
+      const size = clampNodeSize({
+        width: gesture.startSize.width + dx,
+        height: gesture.startSize.height + dy,
+      });
+      this.draftSizes.set(gesture.nodeId, size);
+      const position = this.draftPositions.get(gesture.nodeId) ?? node.position;
+      this.index.update(gesture.nodeId, nodeRectAt(position, node.collapsed, size));
+      this.scheduleDraw();
+      return;
+    }
+
     if (gesture.kind === 'marquee') {
       const world = this.screenToWorld(screen);
       const rect: Rect = {
@@ -747,6 +907,19 @@ export class CanvasEngine {
     this.continuous = false;
     this.marquee = null;
 
+    if (gesture?.kind === 'resize-node') {
+      const size = this.draftSizes.get(gesture.nodeId);
+      this.draftSizes.delete(gesture.nodeId);
+      if (size) {
+        const result = this.controller.resizeNode(gesture.nodeId, size);
+        if (!result.ok) this.notify(result.message, 'error');
+      }
+      this.rebuildIndex();
+      this.emit();
+      this.scheduleDraw();
+      return;
+    }
+
     if (gesture?.kind === 'drag-node' && gesture.moved && this.draftPositions.size > 0) {
       const positions: Record<NodeId, Point> = {};
       for (const [id, position] of this.draftPositions) positions[id] = position;
@@ -762,11 +935,14 @@ export class CanvasEngine {
   }
 
   cancelGesture(): void {
-    if (!this.gesture) return;
+    const gesture = this.gesture;
+    if (!gesture) return;
+    if (gesture.kind === 'resize-node') this.draftSizes.delete(gesture.nodeId);
     this.gesture = null;
     this.continuous = false;
     this.marquee = null;
     this.draftPositions.clear();
+    this.rebuildIndex();
     this.emit();
     this.scheduleDraw();
   }
@@ -785,9 +961,11 @@ export class CanvasEngine {
   }
 
   private cursorForState(): string {
+    if (this.gesture?.kind === 'resize-node') return 'nwse-resize';
     if (this.gesture?.kind === 'pan') return 'grabbing';
     if (this.gesture?.kind === 'drag-node') return 'grabbing';
     if (this.gesture?.kind === 'marquee') return 'crosshair';
+    if (this.hoverResize) return 'nwse-resize';
     if (this.hoveredId) return 'grab';
     return 'default';
   }
@@ -869,6 +1047,11 @@ export class CanvasEngine {
 
   stopEditing(options: { commit?: boolean } = {}): void {
     if (options.commit !== false) this.flushDraft({ immediate: true });
+    // An editor can disappear mid-resize (Escape, deleting the window). Drop any
+    // provisional size with it so the canvas cannot keep painting a size that was
+    // never committed.
+    const previous = this.editingId;
+    if (previous && this.draftSizes.delete(previous)) this.rebuildIndex();
     if (!this.editingId) return;
     this.editingId = null;
     this.branchAction = null;
@@ -919,7 +1102,7 @@ export class CanvasEngine {
     if (count >= MAX_CHILDREN_PER_NODE) {
       return {
         allowed: false,
-        message: `Branch limit reached — this note already has ${MAX_CHILDREN_PER_NODE} branches. Delete one to create another.`,
+        message: `Branch limit reached — this window already has ${MAX_CHILDREN_PER_NODE} branches. Delete one to create another.`,
       };
     }
     return { allowed: true };
@@ -953,7 +1136,8 @@ export class CanvasEngine {
         state.nodeId === this.branchAction.nodeId &&
         state.start === this.branchAction.start &&
         state.end === this.branchAction.end &&
-        state.text === this.branchAction.text);
+        state.text === this.branchAction.text &&
+        state.sourceMessageId === this.branchAction.sourceMessageId);
     if (same) {
       if (state) this.branchAction = state;
       return;
@@ -976,6 +1160,7 @@ export class CanvasEngine {
     const reference: SourceReference = {
       sourceNodeId: source.id,
       selectedTextSnapshot: action.text,
+      ...(action.sourceMessageId ? { sourceMessageId: action.sourceMessageId } : {}),
       startOffset: action.start,
       endOffset: action.end,
       sourceContentVersion: source.contentVersion,
@@ -989,7 +1174,12 @@ export class CanvasEngine {
     // window — a session change that retires any earlier claim. A failed attempt
     // records nothing, so the same selection can simply be tried again.
     this.consumedSelection = created
-      ? { nodeId: action.nodeId, start: action.start, end: action.end }
+      ? {
+          nodeId: action.nodeId,
+          start: action.start,
+          end: action.end,
+          ...(action.sourceMessageId ? { sourceMessageId: action.sourceMessageId } : {}),
+        }
       : null;
     return created;
   }
@@ -1019,7 +1209,8 @@ export class CanvasEngine {
       consumed &&
         consumed.nodeId === action.nodeId &&
         consumed.start === action.start &&
-        consumed.end === action.end,
+        consumed.end === action.end &&
+        consumed.sourceMessageId === action.sourceMessageId,
     );
   }
 
@@ -1091,7 +1282,7 @@ export class CanvasEngine {
     const previews: DeletionPreview[] = [];
     for (const id of roots) {
       if (id === this.doc.rootNodeId) {
-        this.notify('The root note cannot be deleted. Use “Reset canvas” to start over.', 'error');
+        this.notify('The root window cannot be deleted. Use “Reset canvas” to start over.', 'error');
         return;
       }
       const preview = previewDeletion(this.doc, id);
@@ -1120,7 +1311,13 @@ export class CanvasEngine {
     this.pendingAction = {
       kind: 'reset',
       nodeCount: Object.keys(this.doc.nodes).length,
-      characterCount: Object.values(this.doc.nodes).reduce((sum, node) => sum + node.content.length, 0),
+      characterCount: Object.values(this.doc.nodes).reduce(
+        (sum, node) =>
+          sum +
+          node.content.length +
+          node.chat.reduce((chatTotal, message) => chatTotal + message.content.length, 0),
+        0,
+      ),
     };
     this.emit();
   }

@@ -70,20 +70,32 @@ export function useKeyboardShortcuts(
 ): void {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A modal owns the keyboard while it is open (help, settings, confirm).
+      // Its own Escape handler closes it; canvas shortcuts must not fire behind it.
+      if (document.querySelector('.modal-backdrop')) return;
+
       const mod = event.metaKey || event.ctrlKey;
       const editing = engine.getEditingId() !== null;
       const inText = isTextEntry(event.target);
+      // The open AI window is not a text field as a whole, but a text selection
+      // inside it must still protect the window from Delete/space/arrow actions.
+      const inOpenWindow =
+        event.target instanceof Element && event.target.closest('.note-window') !== null;
+      // The chat composer's draft is not document content, so its native text
+      // undo is more useful than document undo while it has focus.
+      const inChatComposer =
+        event.target instanceof Element && event.target.closest('.ai-chat__input') !== null;
 
-      // --- Undo / redo: intercepted even inside the editor, because the
-      // document (not the textarea) owns history. The draft is flushed first so
-      // the edit being undone is the most recent document state.
-      if (mod && event.key.toLowerCase() === 'z') {
+      // --- Undo / redo: intercepted even inside the note editor, because the
+      // document (not the textarea) owns note history. The draft is flushed
+      // first so the edit being undone is the most recent document state.
+      if (mod && event.key.toLowerCase() === 'z' && !inChatComposer) {
         event.preventDefault();
         if (event.shiftKey) engine.redo();
         else engine.undo();
         return;
       }
-      if (mod && event.key.toLowerCase() === 'y') {
+      if (mod && event.key.toLowerCase() === 'y' && !inChatComposer) {
         event.preventDefault();
         engine.redo();
         return;
@@ -122,12 +134,12 @@ export function useKeyboardShortcuts(
         }
         if (editing && event.key === 'Enter') {
           event.preventDefault();
-          engine.notify('Select some text in the note first, then branch.', 'info');
+          engine.notify('Select some text first, then branch.', 'info');
           return;
         }
       }
 
-      if (mod && event.key.toLowerCase() === 'a' && !inText) {
+      if (mod && event.key.toLowerCase() === 'a' && !inText && !inOpenWindow) {
         event.preventDefault();
         engine.selectAll();
         return;
@@ -171,7 +183,7 @@ export function useKeyboardShortcuts(
 
       // --- Space to pan (held) — unless a control has focus, where space is
       // activation.
-      if (event.code === 'Space' && !inText && !isActivatableControl(event.target)) {
+      if (event.code === 'Space' && !inText && !inOpenWindow && !isActivatableControl(event.target)) {
         engine.setPanModifier(true);
         return;
       }
@@ -186,7 +198,7 @@ export function useKeyboardShortcuts(
         return;
       }
 
-      if ((event.key === 'Delete' || event.key === 'Backspace') && !inText) {
+      if ((event.key === 'Delete' || event.key === 'Backspace') && !inText && !inOpenWindow) {
         const ids = engine.getSelectedIds();
         if (ids.length > 0) {
           event.preventDefault();

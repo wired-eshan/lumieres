@@ -19,13 +19,22 @@ const CANVAS_SHORTCUTS: Array<[string, string]> = [
 ];
 
 const NOTE_SHORTCUTS: Array<[string, string]> = [
-  ['Select text', 'Reveals “Create branch”'],
+  ['Select text', 'Reveals “Create branch” in notes and AI replies'],
   [`${MOD}↵ or ${MOD}B`, 'Branch from the selected text'],
   ['Escape', 'Dismiss the action, then leave the editor'],
   [`${MOD}Z / ⇧${MOD}Z`, 'Undo / redo (document-wide)'],
   ['Delete', 'Delete the selection (with preview)'],
   [`${MOD}S`, 'Save now'],
   [`${MOD}E / ${MOD}O`, 'Export / import a canvas'],
+];
+
+const AI_SHORTCUTS: Array<[string, string]> = [
+  ['Note ⇄ AI toggle', 'Switch a window between note and conversation'],
+  ['Enter', 'Send a message'],
+  ['Shift + Enter', 'New line in the composer'],
+  ['Stop', 'Cancel this window only; other chats keep running'],
+  ['Drag the corner', 'Resize the window (arrow keys work too)'],
+  ['Settings', 'Add your own API key and choose a provider, model and effort level'],
 ];
 
 export interface HelpPanelProps {
@@ -73,6 +82,7 @@ export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
           <p className="help__lede">
             Every canvas starts with one root note. Select a phrase, create a branch, and keep going —
             each window can spawn up to 50 of its own, and the graph keeps the lineage of every idea.
+            Any window can also switch to an AI conversation; each one keeps its own chat.
           </p>
 
           <div className="help__grid">
@@ -102,24 +112,42 @@ export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
                 ))}
               </dl>
             </section>
+            <section>
+              <h3>AI conversations</h3>
+              <dl>
+                {AI_SHORTCUTS.map(([keys, description]) => (
+                  <div className="help__row" key={keys}>
+                    <dt>
+                      <kbd>{keys}</kbd>
+                    </dt>
+                    <dd>{description}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           </div>
 
           <section className="help__limits">
-            <h3>Limits</h3>
+            <h3>Limits &amp; privacy</h3>
             <ul>
               <li>
-                <strong>20,000 characters</strong> per note, counted in UTF-16 code units. Pasting past
-                the limit trims the paste rather than the existing text.
+                <strong>20,000 characters</strong> per note and per chat message, counted in UTF-16
+                code units. Pasting past the limit trims the paste rather than the existing text.
               </li>
               <li>
-                <strong>50 branches</strong> per note. The limit applies to each note independently.
+                <strong>50 branches</strong> per window, independently for notes and AI chats.
               </li>
               <li>
-                Deleting a note removes its whole subtree, after a preview of exactly what goes.
+                Deleting a window removes its whole subtree, after a preview of exactly what goes.
               </li>
               <li>
-                Everything is stored locally in this browser and restored on refresh. Export to JSON
-                for a portable copy.
+                Chat requests use <strong>your own API key</strong> with any OpenAI-compatible
+                provider. It is stored in this browser only and never included in canvas exports;
+                requests go directly to the provider whose base URL you configure.
+              </li>
+              <li>
+                Everything — notes, conversations, positions and sizes — is stored locally and
+                restored on refresh. Export to JSON for a portable copy.
               </li>
             </ul>
           </section>

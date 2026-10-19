@@ -11,6 +11,7 @@ import { useController, useEngine } from '../../app/EngineContext';
 import { useGraphStore } from '../../graph/graphStore';
 import { computeStats, type ValidationIssue } from '../../graph/graphValidation';
 import { downloadDocument, importFromFile } from '../../persistence/importExport';
+import { chatRuntime } from '../../ai/chatRuntime';
 import { formatCount, truncate } from '../../utils/misc';
 import {
   BranchIcon,
@@ -18,6 +19,7 @@ import {
   HelpIcon,
   RedoIcon,
   ResetIcon,
+  SettingsIcon,
   UndoIcon,
   UploadIcon,
 } from '../icons';
@@ -25,9 +27,10 @@ import {
 export interface CanvasToolbarProps {
   onIssues: (issues: ValidationIssue[], notes: string[]) => void;
   onHelp: () => void;
+  onSettings: () => void;
 }
 
-export function CanvasToolbar({ onIssues, onHelp }: CanvasToolbarProps): ReactNode {
+export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarProps): ReactNode {
   const engine = useEngine();
   const controller = useController();
   const doc = useGraphStore((state) => state.doc);
@@ -57,6 +60,7 @@ export function CanvasToolbar({ onIssues, onHelp }: CanvasToolbarProps): ReactNo
       return;
     }
     engine.stopEditing({ commit: false });
+    chatRuntime.disposeAll();
     controller.replaceDocument(outcome.doc, { resetHistory: true });
     engine.fitToView();
     onIssues(outcome.issues, outcome.notes);
@@ -90,7 +94,8 @@ export function CanvasToolbar({ onIssues, onHelp }: CanvasToolbarProps): ReactNo
           spellCheck={false}
         />
         <span className="toolbar__stats" title="Notes · branches per node · depth">
-          {formatCount(stats.nodeCount)} notes · max {stats.maxChildren}/50 branches · depth {stats.maxDepth}
+          {formatCount(stats.nodeCount)} {stats.nodeCount === 1 ? 'window' : 'windows'} · max{' '}
+          {stats.maxChildren}/50 branches · depth {stats.maxDepth}
         </span>
       </div>
 
@@ -160,6 +165,15 @@ export function CanvasToolbar({ onIssues, onHelp }: CanvasToolbarProps): ReactNo
           aria-label="Reset canvas"
         >
           <ResetIcon />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          onClick={onSettings}
+          title="AI settings — provider, API key, model and effort"
+          aria-label="AI settings"
+        >
+          <SettingsIcon />
         </button>
         <button
           type="button"

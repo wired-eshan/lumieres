@@ -13,12 +13,15 @@ import { useGraphStore } from '../graph/graphStore';
 import { validateGraph, type ValidationIssue } from '../graph/graphValidation';
 import { createAutosave, type AutosaveController } from '../persistence/autosave';
 import { createDocumentRepository, type RepositoryKind } from '../persistence/documentRepository';
+import { chatRuntime } from '../ai/chatRuntime';
 import { GraphCanvas } from '../components/canvas/GraphCanvas';
 import { CanvasToolbar } from '../components/canvas/CanvasToolbar';
 import { ConfirmDialog } from '../components/panels/ConfirmDialog';
 import { HelpPanel } from '../components/panels/HelpPanel';
 import { IssueBanner } from '../components/panels/IssueBanner';
+import { SettingsPanel } from '../components/panels/SettingsPanel';
 import { Toasts } from '../components/panels/Toasts';
+import { UIProvider, type UICommands } from './UIContext';
 
 export function App(): ReactNode {
   const engine = useEngine();
@@ -27,6 +30,7 @@ export function App(): ReactNode {
 
   const [ready, setReady] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [notes, setNotes] = useState<string[]>([]);
   const [repositoryKind, setRepositoryKind] = useState<RepositoryKind>('memory');
@@ -38,6 +42,9 @@ export function App(): ReactNode {
     () =>
       controller.subscribe((nextDoc, change) => {
         engine.setDocument(nextDoc, change);
+        // A deleted/reset window cannot finish a stream usefully; release its
+        // request and per-node session instead of leaving it running invisibly.
+        for (const id of change.removed) chatRuntime.dispose(id);
       }),
     [controller, engine],
   );
@@ -120,49 +127,63 @@ export function App(): ReactNode {
     [engine],
   );
 
-  const isEmptyCanvas = useMemo(
-    () =>
-      Object.keys(doc.nodes).length === 1 &&
-      !Object.values(doc.nodes).some((node) => node.parentId !== null) &&
-      Object.values(doc.nodes)[0]?.content.trim().length === 0,
-    [doc],
+  const isEmptyCanvas = useMemo(() => {
+    const nodes = Object.values(doc.nodes);
+    return (
+      nodes.length === 1 &&
+      nodes[0]?.parentId === null &&
+      nodes[0]?.content.trim().length === 0 &&
+      nodes[0]?.chat.length === 0
+    );
+  }, [doc]);
+
+  const uiCommands = useMemo<UICommands>(
+    () => ({ openSettings: () => setSettingsOpen(true) }),
+    [],
   );
 
   return (
-    <div className="app">
-      <CanvasToolbar onIssues={handleIssues} onHelp={() => setHelpOpen(true)} />
-      <GraphCanvas onHelpRequested={() => setHelpOpen(true)}>
-        {isEmptyCanvas ? <FirstRunHint /> : null}
-        <CanvasReadout />
-      </GraphCanvas>
-
-      {issues.length > 0 || notes.length > 0 ? (
-        <IssueBanner
-          issues={issues}
-          notes={notes}
-          onDismiss={dismissIssues}
-          onFocusNode={focusNode}
+    <UIProvider commands={uiCommands}>
+      <div className="app">
+        <CanvasToolbar
+          onIssues={handleIssues}
+          onHelp={() => setHelpOpen(true)}
+          onSettings={() => setSettingsOpen(true)}
         />
-      ) : null}
+        <GraphCanvas onHelpRequested={() => setHelpOpen(true)}>
+          {isEmptyCanvas ? <FirstRunHint /> : null}
+          <CanvasReadout />
+        </GraphCanvas>
 
-      <Toasts />
-      <ConfirmDialog />
-      <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
+        {issues.length > 0 || notes.length > 0 ? (
+          <IssueBanner
+            issues={issues}
+            notes={notes}
+            onDismiss={dismissIssues}
+            onFocusNode={focusNode}
+          />
+        ) : null}
 
-      {!ready ? (
-        <div className="boot-overlay" role="status" aria-live="polite">
-          <span className="boot-overlay__spinner" aria-hidden="true" />
-          Restoring your canvas…
-        </div>
-      ) : null}
+        <Toasts />
+        <ConfirmDialog />
+        <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
-      {repositoryKind === 'memory' && ready ? (
-        <div className="storage-warning" role="status">
-          Local storage is unavailable in this browser, so this canvas will not survive a refresh.
-          Export it to keep your work.
-        </div>
-      ) : null}
-    </div>
+        {!ready ? (
+          <div className="boot-overlay" role="status" aria-live="polite">
+            <span className="boot-overlay__spinner" aria-hidden="true" />
+            Restoring your canvas…
+          </div>
+        ) : null}
+
+        {repositoryKind === 'memory' && ready ? (
+          <div className="storage-warning" role="status">
+            Local storage is unavailable in this browser, so this canvas will not survive a refresh.
+            Export it to keep your work.
+          </div>
+        ) : null}
+      </div>
+    </UIProvider>
   );
 }
 
@@ -172,7 +193,7 @@ function FirstRunHint(): ReactNode {
       <strong>Start here</strong>
       <span>
         Type in the root note, then <em>select a phrase</em> and choose <em>Create branch</em> to grow
-        the graph.
+        the graph. Switch any window to <em>AI</em> to chat with your own key.
       </span>
     </div>
   );
@@ -185,7 +206,8 @@ function CanvasReadout(): ReactNode {
   if (nodeCount < 2) return null;
   return (
     <div className="canvas-readout" data-overlay="true" aria-hidden="true">
-      {nodeCount} notes{selectedCount > 1 ? ` · ${selectedCount} selected` : ''}
+      {nodeCount} {nodeCount === 1 ? 'window' : 'windows'}
+      {selectedCount > 1 ? ` · ${selectedCount} selected` : ''}
     </div>
   );
 }

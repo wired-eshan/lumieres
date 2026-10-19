@@ -19,7 +19,7 @@ import {
   updateNodeContent,
   type CreateBranchValue,
 } from './graphOperations';
-import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH, type GraphDocument, type SourceReference } from './types';
+import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH, SCHEMA_VERSION, type GraphDocument, type SourceReference } from './types';
 import { isValidGraph, validateGraph } from './graphValidation';
 
 /** Applies a content edit, failing loudly so a broken fixture cannot pass silently. */
@@ -45,7 +45,7 @@ describe('document creation', () => {
     expect(doc.rootNodeId).toBe(nodes[0]?.id);
     expect(nodes[0]?.parentId).toBeNull();
     expect(doc.title).toBe('Test canvas');
-    expect(doc.schemaVersion).toBe(1);
+    expect(doc.schemaVersion).toBe(SCHEMA_VERSION);
     expect(isValidGraph(doc)).toBe(true);
   });
 });

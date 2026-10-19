@@ -1,11 +1,11 @@
 /**
- * The open editor window.
+ * The open window.
  *
- * Every dimension here is expressed in **world units** and comes from the
- * metrics module via inline styles, because the window lives inside the
- * camera-transformed overlay layer. Its typography must match the canvas
- * renderer exactly: when the editor opens over a painted window, no text may
- * shift by even a pixel.
+ * Every dimension here is a **world unit** and comes from the metrics module via
+ * inline styles, because the window lives inside the camera-transformed overlay
+ * layer. The frame is a flex column: header, body region, footer. That is what
+ * lets a resize reflow the editor/chat without measuring or re-rendering React
+ * on every pointer move.
  *
  * The engine, not CSS, writes this element's `transform` (its world position),
  * so no positioning rules belong here.
@@ -15,6 +15,8 @@
   position: absolute;
   top: 0;
   left: 0;
+  display: flex;
+  flex-direction: column;
   border-radius: 14px;
   background: var(--node-fill);
   border: 1.75px solid var(--accent);
@@ -23,11 +25,14 @@
   contain: layout style;
 }
 
+.note-window.is-ai {
+  border-color: var(--accent-ai);
+  box-shadow: 0 0 0 1px rgba(183, 156, 255, 0.18), 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
 .note-window__header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -46,14 +51,59 @@
   background: var(--accent);
 }
 
+.note-window.is-ai .note-window__accent {
+  background: var(--accent-ai);
+}
+
 .note-window__accent.is-root {
   background: var(--accent-teal);
+}
+
+/* Mode switch: note ⇄ AI conversation. Both modes share one window record. */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: 6px;
+  padding: 2px;
+  flex: none;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.mode-toggle__button {
+  display: inline-grid;
+  place-items: center;
+  width: 23px;
+  height: 23px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.mode-toggle__button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-toggle__button.is-active {
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.note-window.is-ai .mode-toggle__button.is-active {
+  color: var(--accent-ai);
+  background: rgba(183, 156, 255, 0.14);
 }
 
 .note-window__title {
   flex: 1;
   min-width: 0;
-  margin-left: 10px;
+  margin-left: 5px;
   padding: 4px 2px;
   border: 0;
   border-bottom: 1px solid transparent;
@@ -87,13 +137,24 @@
   border-radius: 6px;
 }
 
+/* Body region: starts exactly at `bodyTopOffset` from the metrics module. */
+.note-window__main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 7px 14px 6px;
+}
+
 /* Source reference chip — the text this branch came from. */
 .note-window__source {
-  position: absolute;
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: none;
   height: 22px;
+  margin-bottom: 8px;
   padding: 0 8px 0 9px;
   border-radius: 6px;
   background: var(--accent-soft);
@@ -137,7 +198,10 @@
 }
 
 .note-window__body {
-  position: absolute;
+  flex: 1;
+  min-height: 0;
+  display: block;
+  width: 100%;
   margin: 0;
   padding: 0;
   border: 0;
@@ -177,14 +241,12 @@
 }
 
 .note-window__footer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: none;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 14px;
+  padding: 0 26px 0 14px;
   border-top: 1px solid var(--node-border);
   color: var(--text-faint);
   font-family: var(--font-mono);
@@ -217,4 +279,292 @@
   flex: none;
 }
 
-/* Collapsed windows are canvas-only; nothing to style here. */
+/* Resize affordance, bottom-right. Kept inside the world-scaled overlay, so its
+   drag maths divide screen pixels by the camera zoom. */
+.note-window__resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: nwse-resize;
+  opacity: 0.65;
+}
+
+.note-window__resize:hover,
+.note-window__resize:focus-visible {
+  opacity: 1;
+  color: var(--accent-strong);
+  background: rgba(124, 140, 248, 0.14);
+}
+
+.is-resizing-window,
+.is-resizing-window * {
+  cursor: nwse-resize !important;
+  user-select: none !important;
+}
+
+/* ------------------------------------------------------------------ */
+/* AI conversation                                                     */
+/* ------------------------------------------------------------------ */
+
+.ai-chat {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.ai-chat__messages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 0 8px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  user-select: text;
+}
+
+.ai-chat__messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.ai-chat__messages::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+
+.ai-message {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ai-message.is-user {
+  align-items: flex-end;
+}
+
+.ai-message__role {
+  color: var(--text-faint);
+  font-size: 9.5px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ai-message.is-user .ai-message__role {
+  color: var(--accent-strong);
+}
+
+.ai-message__content {
+  max-width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+.ai-message.is-user .ai-message__content {
+  padding: 6px 9px;
+  border-radius: 9px;
+  background: rgba(124, 140, 248, 0.14);
+  color: #eef0ff;
+}
+
+.ai-message.is-interrupted .ai-message__content {
+  border-left: 2px solid var(--warning);
+  padding-left: 8px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ai-message.is-streaming .ai-message__content {
+  color: var(--text);
+}
+
+.ai-chat__cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -1px;
+  background: var(--accent-ai);
+  animation: ai-cursor 900ms steps(2, start) infinite;
+}
+
+@keyframes ai-cursor {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-chat__cursor {
+    animation: none;
+  }
+}
+
+.ai-chat__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex: 1;
+  min-height: 90px;
+  padding: 14px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+  user-select: none;
+}
+
+.ai-chat__empty p {
+  margin: 0;
+  max-width: 32ch;
+}
+
+.ai-chat__empty strong {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.ai-chat__context-note {
+  max-width: 36ch;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-style: italic;
+}
+
+.ai-chat__empty-mark {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--accent-ai);
+  background: rgba(183, 156, 255, 0.12);
+}
+
+.ai-chat__error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid rgba(242, 104, 107, 0.4);
+  background: rgba(242, 104, 107, 0.1);
+  color: #ffd9da;
+  font-size: 12px;
+}
+
+.ai-chat__error-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ai-chat__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex: none;
+  margin-bottom: 6px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(183, 156, 255, 0.3);
+  background: rgba(183, 156, 255, 0.09);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.ai-chat__notice .button {
+  flex: none;
+  height: 26px;
+  padding: 0 9px;
+  font-size: 11.5px;
+}
+
+.ai-chat__composer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 7px;
+  border-top: 1px solid var(--node-border);
+}
+
+.ai-chat__input {
+  width: 100%;
+  min-height: 40px;
+  max-height: 96px;
+  padding: 6px 8px;
+  border: 1px solid var(--node-border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  resize: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+.ai-chat__input::placeholder {
+  color: var(--text-faint);
+}
+
+.ai-chat__input:focus {
+  outline: none;
+  border-color: rgba(183, 156, 255, 0.55);
+  background: rgba(0, 0, 0, 0.26);
+}
+
+.ai-chat__composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.ai-chat__count {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.ai-chat__count.is-warning {
+  color: var(--warning);
+}
+
+.ai-chat__count.is-full,
+.ai-chat__count.is-over {
+  color: var(--danger);
+}
+
+.ai-chat__send {
+  flex: none;
+  height: 27px;
+  padding: 0 10px;
+  gap: 5px;
+  font-size: 11.5px;
+}

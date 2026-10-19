@@ -7,9 +7,19 @@
  * by `validateGraph` rather than trimmed.
  */
 
-import { createEdgeId, createNodeId } from '../utils/id';
+import { createEdgeId, createId, createNodeId } from '../utils/id';
+import { clampNodeSize, defaultNodeSize } from '../graph/metrics';
 import { normalizeDocument, type ValidationIssue } from '../graph/graphValidation';
-import { SCHEMA_VERSION, type GraphDocument, type GraphEdge, type NoteNode, type SourceReference } from '../graph/types';
+import {
+  SCHEMA_VERSION,
+  type ChatMessage,
+  type GraphDocument,
+  type GraphEdge,
+  type NoteNode,
+  type SourceReference,
+  type WindowKind,
+  type WindowSize,
+} from '../graph/types';
 
 export interface MigrationResult {
   doc: GraphDocument | null;
@@ -47,13 +57,47 @@ function asSourceReference(value: unknown, sourceNodeId: string): SourceReferenc
   const snapshot = asString(value.selectedTextSnapshot, '');
   const start = Math.max(0, Math.round(asNumber(value.startOffset, 0)));
   const end = Math.max(start, Math.round(asNumber(value.endOffset, start + snapshot.length)));
+  const sourceMessageId = asString(value.sourceMessageId, '');
   return {
     sourceNodeId: asString(value.sourceNodeId, sourceNodeId),
     selectedTextSnapshot: snapshot,
+    ...(sourceMessageId.length > 0 ? { sourceMessageId } : {}),
     startOffset: start,
     endOffset: end,
     sourceContentVersion: Math.max(0, Math.round(asNumber(value.sourceContentVersion, 0))),
   };
+}
+
+function asKind(value: unknown): WindowKind {
+  return value === 'ai' ? 'ai' : 'note';
+}
+
+/** Size defaults by mode; out-of-range or non-finite values are clamped. */
+function asSize(value: unknown, kind: WindowKind): WindowSize {
+  if (!isRecord(value)) return defaultNodeSize(kind);
+  return clampNodeSize({
+    width: asNumber(value.width, defaultNodeSize(kind).width),
+    height: asNumber(value.height, defaultNodeSize(kind).height),
+  });
+}
+
+function asChat(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  const out: ChatMessage[] = [];
+  for (const entry of value) {
+    if (!isRecord(entry)) continue;
+    if (entry.role !== 'user' && entry.role !== 'assistant') continue;
+    const content = asString(entry.content, '');
+    if (content.length === 0) continue;
+    out.push({
+      id: asString(entry.id, '') || createId('msg'),
+      role: entry.role,
+      content,
+      createdAt: asNumber(entry.createdAt, Date.now()),
+      ...(entry.interrupted === true ? { interrupted: true } : {}),
+    });
+  }
+  return out;
 }
 
 /** Version migrations, applied in order until the document reaches `SCHEMA_VERSION`. */
@@ -62,6 +106,11 @@ const MIGRATIONS: Record<number, (raw: RawRecord, notes: string[]) => RawRecord>
   0: (raw, notes) => {
     notes.push('Upgraded a pre-versioned document to schema 1.');
     return { ...raw, schemaVersion: 1 };
+  },
+  // 1 -> 2: windows gained a mode, a resizable world-space size and AI chat.
+  1: (raw, notes) => {
+    notes.push('Upgraded the canvas to schema 2 (resizable note and AI chat windows).');
+    return { ...raw, schemaVersion: 2 };
   },
 };
 
@@ -113,6 +162,7 @@ export function migrateDocument(input: unknown): MigrationResult {
     if (id !== originalId) idRemap.set(originalId, id);
     const parentIdRaw = value.parentId;
     const parentId = typeof parentIdRaw === 'string' && parentIdRaw.length > 0 ? parentIdRaw : null;
+    const kind = asKind(value.kind);
     nodes[id] = {
       id,
       parentId,
@@ -120,6 +170,9 @@ export function migrateDocument(input: unknown): MigrationResult {
       // Content is preserved exactly, including anything over the limit.
       content: asString(value.content, ''),
       position: asPoint(value.position),
+      size: asSize(value.size, kind),
+      kind,
+      chat: asChat(value.chat),
       sourceReference: asSourceReference(value.sourceReference, parentId ?? ''),
       collapsed: asBoolean(value.collapsed, false),
       contentVersion: Math.max(1, Math.round(asNumber(value.contentVersion, 1))),

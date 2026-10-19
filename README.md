@@ -1,12 +1,14 @@
 # Lumières
 
-A graph-structured note-taking canvas. Start with one note window on an infinite
-workspace, select a phrase, and branch it into a connected child window. Repeat
+A graph-structured thinking workspace. Start with one window on an infinite
+canvas, select a phrase, and branch it into a connected child window. Repeat
 from any window to grow a tree of connected thinking.
 
-Built to the specification in [`agents.md`](./agents.md). AI features are
-**not implemented** — no API keys, no LLM calls, no fake responses — but the
-architecture has explicit seams for them (see [AI readiness](#ai-readiness)).
+Every window can switch between a **note** and an **AI conversation** backed by
+the user's own OpenAI-compatible API key. Conversations, notes, window sizes and
+the graph itself are stored locally and restored on refresh.
+
+Built to the specification in [`agents.md`](./agents.md).
 
 ```bash
 npm install
@@ -19,9 +21,23 @@ npm run dev        # http://localhost:5173
 | `npm run build` | Typecheck, then production build into `dist/` |
 | `npm run preview` | Serve the production build |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
-| `npm test` | Vitest (187 tests) |
+| `npm test` | Vitest (275 tests) |
 
 Requires Node 20+. The app is fully client-side; there is no backend to run.
+
+### AI setup
+
+Open the gear icon in the toolbar (or Settings from an empty chat window), paste
+an API key, and set the provider's OpenAI-compatible base URL (the default is
+`https://api.openai.com/v1`). Press **Load models** to read the provider's
+`GET /models` response into the model picker; when that response (or a known
+model family) advertises reasoning-effort support, choose a level for the
+selected model. Save to apply.
+
+The key is stored only in this browser's `localStorage`; it is never written
+into the canvas document, exported, or logged. Requests go directly from the
+browser to the provider whose base URL you configure. Use a key you are
+comfortable holding on this device.
 
 ---
 
@@ -30,17 +46,32 @@ Requires Node 20+. The app is fully client-side; there is no backend to run.
 - **Infinite canvas** — pan, zoom around the cursor, fit-to-view, fit-selection,
   marquee select, multi-select drag, and a minimap. World coordinates only:
   the camera never touches the document.
+- **Two window modes** — every window is a note or an AI conversation, switched
+  from its header. The note body is preserved as chat context; the conversation
+  is preserved if you switch back. Mode changes are undoable.
+- **Resizable windows** — drag the bottom-right corner. A selected painted
+  window shows the corner handle on the canvas; the open editor has its own
+  handle, and arrow keys resize it when focused. Sizes live in world coordinates
+  and survive zoom, pan, refresh, export and import. The document is written once
+  on release, so a drag is one undo step and no React render happens per pointer
+  move.
 - **Note windows** — title, body, collapse/expand, focus, delete, character
   budget, branch budget, and a visible link back to the parent.
 - **Branch from a selection** — highlight text, choose *Create branch* (or
-  ⌘/Ctrl + ↵). The child window records the source node, the selected text, the
-  UTF-16 offsets, and a snapshot, then opens ready to type.
-- **Limits, enforced in the domain** — 50 direct children per note and 20,000
-  characters per note, both validated in `graphOperations`, not just in the UI.
-- **Undo/redo** across creation, deletion, text and movement, with typing bursts
-  coalesced into one step.
+  ⌘/Ctrl + ↵). Works in note bodies and AI replies; a chat selection records the
+  message id so staleness can be checked later. The child opens ready to type.
+- **AI chat** — streaming replies, a composer with Enter-to-send, Stop for one
+  window only, per-window retries, independent conversations, an explicit
+  no-key state, and specific error messages for auth, rate limits, refusals and
+  network failures. Request tokens never touch the document or autosave.
+- **Limits, enforced in the domain** — 50 direct children per window and 20,000
+  characters per note *and per chat message*, all validated in `graphOperations`
+  rather than only in the UI.
+- **Undo/redo** across creation, deletion, text, movement, mode switches and
+  resizes, with typing bursts coalesced into one step. Chat turns are conversation
+  history rather than text edits and deliberately stay outside the undo stack.
 - **Local persistence** — debounced autosave to IndexedDB, restored on refresh,
-  plus JSON import/export.
+  plus JSON import/export including modes, sizes and conversations.
 
 ### Keyboard
 
@@ -49,10 +80,12 @@ Requires Node 20+. The app is fully client-side; there is no backend to run.
 | Wheel / trackpad | Pan · **⌘ + wheel** zooms around the pointer |
 | Space + drag, middle-drag | Pan |
 | Drag empty space | Marquee select · **Shift + click** adds |
-| Double-click, Enter, F2 | Edit the selected note |
+| Double-click, Enter, F2 | Edit the selected window |
 | Select text, then **⌘↵** / **⌘B** | Create a branch from that text |
+| Enter / Shift + Enter | Send an AI message / add a newline |
+| Drag the corner handle | Resize · arrow keys resize when focused |
 | Escape | Dismiss the floating action → leave the editor → clear selection |
-| ⌘Z / ⇧⌘Z | Undo / redo (document-wide, works inside the editor) |
+| ⌘Z / ⇧⌘Z | Undo / redo (document-wide; works inside the note editor) |
 | Delete | Delete selection, with a preview when it removes a subtree |
 | Arrow keys | Move to parent, child, or sibling window |
 | ⌘1 / ⌘2 / ⌘0 | Fit graph / fit selection / reset zoom |
@@ -64,18 +97,20 @@ Requires Node 20+. The app is fully client-side; there is no backend to run.
 
 ```
 src/
-  graph/       document model, pure operations, validation, layout, history, store
+  graph/       document model, pure operations, validation, layout, history, store, metrics
   canvas/      engine, camera, renderer, spatial index, hit testing, interactions
-  editor/      character-limit rules, textarea selection geometry
+  editor/      character-limit rules, textarea selection geometry, chat DOM selection
   persistence/ repository, IndexedDB, migrations, autosave, import/export
-  ai/          session types, isolation state, context assembly, service boundary
-  components/  React: canvas host, note editor, floating controls, panels
-  app/         shell, boot sequence, engine context
+  ai/          settings, model discovery, provider transport, request runtime, context
+  components/  React: canvas host, window frame, note editor, AI chat, panels
+  app/         shell, boot sequence, engine context, UI commands
 ```
 
-The dependency rule is one-directional: `components` → `canvas`/`graph` →
-`persistence`. Graph logic imports nothing from React, and the renderer imports
-nothing from the DOM beyond a 2D context.
+The dependency direction is deliberate: `components` → `canvas`/`graph` →
+`persistence`; `ai` provides services to components and imports graph types, but
+the graph and canvas layers never import the provider transport. Graph logic
+imports nothing from React, and the renderer imports nothing from the DOM beyond
+a 2D context.
 
 ### One canvas, not five thousand React nodes
 
@@ -89,10 +124,12 @@ tree: the component tree stays the same size whether the graph has 1 note or
 
 | State | Lives in | Changes at |
 | --- | --- | --- |
-| Document (nodes, edges, text) | `graphStore` (Zustand) | user actions |
+| Document (nodes, edges, text, chat, sizes, modes) | `graphStore` (Zustand) | user actions |
 | History (undo/redo patches) | `graphStore` | user actions |
-| Camera, hover, drag offsets, marquee | `CanvasEngine` (mutable) | pointer speed |
+| Camera, hover, drag/resize offsets, marquee | `CanvasEngine` (mutable) | pointer speed |
 | Selection, editing target, floating actions | `CanvasEngine` snapshot | discrete events |
+| AI streaming text and request status | `AISessionStore`, keyed by node | token cadence |
+| API key, base URL, model and effort | `ai/settings` (localStorage) | settings changes |
 | Persistence status | `graphStore` | debounce boundaries |
 
 React subscribes to the engine through `useSyncExternalStore` on a small,
@@ -100,14 +137,22 @@ immutable snapshot that only changes on discrete events. Panning, zooming and
 dragging write to engine fields and to `canvas.style.transform` — **no React
 render happens per frame**. During a drag, node positions live in
 `engine.draftPositions`; exactly one document update is committed on release.
+Resizing uses the same pattern with `engine.draftSizes`: the frame and edges are
+redrawn at the provisional size, and one `resizeNode` operation is committed on
+pointer-up.
 
 ### Rendering
 
 - **Culling** — a uniform-grid spatial index (`SpatialGrid`, 480-unit cells)
   answers "what is on screen" and "what is under this point".
+- **Per-window geometry** — node rects come from each window's stored world size
+  (or its in-flight resize draft), so culling, edges, hit testing, minimap,
+  fit-to-view and placement all follow a resized frame without a global layout
+  pass.
 - **Level of detail** — full text above 0.42 zoom, placeholder blocks below it,
   topology-only outlines below 0.14. Text is never drawn at a size where it would
-  be an unreadable smudge.
+  be an unreadable smudge. AI windows preview their conversation tail instead of
+  the note body, with long turns truncated before layout.
 - **Cached text layout** — wrapping is measured once per note and invalidated by
   content, width or font. Panning and zooming never measure text.
 - **Dirty-flag rendering** — `requestAnimationFrame` runs only while something is
@@ -156,6 +201,38 @@ Two invariants keep that native behaviour intact, because both were easy to brea
   frame, a value the editor rewrote — which used to make "Create branch" look
   inert on a perfectly good selection.
 
+### AI windows: document for history, runtime for tokens
+
+Chat is deliberately split across two stores:
+
+- **Persisted turn history lives in `NoteNode.chat`.** It travels with the
+  document through autosave, reload, export, import and undo of deletion, and it
+  is deleted with its window.
+- **In-flight state lives in `AISessionStore`.** Streaming text, status and the
+  active request id are keyed by node id. Deltas are batched at a 50 ms cadence
+  and never touch the document, so typing-speed work does not reach autosave or
+  the canvas renderer.
+- **One write per completed response.** The finished assistant turn is appended
+  in a single operation. A stopped response keeps the partial text and is marked
+  interrupted. Chat turns are not pushed onto the undo stack.
+- **One request lifecycle per window.** `chatRuntime` creates a request id and
+  an `AbortController` per send. Late events from a superseded request are
+  dropped, cancelling one window leaves the others running, and a configurable
+  cap (4) bounds total concurrency with an explicit error rather than a queue.
+- **Context is budgeted.** `buildNodeContext` clips the note body and nearest
+  ancestors; `selectConversationHistory` keeps the newest turns under a separate
+  character budget. Other windows' chats are never sent.
+- **Transport is behind a seam.** `chatService` is the only provider-aware
+  module and loads the OpenAI SDK lazily on first send. `ai/models.ts` reads the
+  configured provider's `/models` endpoint for the picker and its advertised
+  reasoning-effort levels. The API key lives in `ai/settings` (localStorage) and
+  never appears in the document or an export.
+
+Selecting text in an AI reply uses DOM range offsets measured against that
+message's content. The resulting `SourceReference` carries the message id, so
+the source chip's staleness check reads the same text it was created from. A
+selection spanning two messages is rejected rather than recorded ambiguously.
+
 ### Undo/redo as inverse patches
 
 History stores patches, not document snapshots: creating a branch records one
@@ -181,11 +258,18 @@ drops an IndexedDB write during an unload race. Save status is visible in the
 toolbar; a failed write shows as an error rather than silently pretending to
 save.
 
-The document is versioned (`schemaVersion`) with an ordered migration chain, and
-loading is defensive: unknown fields are dropped, missing fields default, edges
-are rebuilt from `parentId`, and unreachable nodes are re-parented to the root.
-**Over-limit notes are never truncated** — they keep every character, are
-reported in a banner, and simply cannot grow until trimmed.
+The document is versioned (`schemaVersion`, currently 2) with an ordered migration
+chain: schema 1 documents gain default note mode, the default note size and an
+empty chat. Loading is defensive: unknown fields are dropped, missing fields
+default, edges are rebuilt from `parentId`, unreachable nodes are re-parented to
+the root, and invalid window sizes are clamped. **Over-limit notes are never
+truncated** — they keep every character, are reported in a banner, and simply
+cannot grow until trimmed. Chat turns are sanitised individually; malformed
+entries are dropped without losing the rest of the conversation.
+
+The API key is stored separately under `lumieres:ai-settings`. It is excluded
+from document serialisation by construction — the document schema has no field
+for it.
 
 ---
 
@@ -221,6 +305,42 @@ restores everything.
 **Multi-node moves are one patch** (`updateMany`) so a drag of ten windows is a
 single undo step and a single document update.
 
+**Resizing is world-space and flex-based.** A window stores `{ width, height }`
+in world units. The frame is a flex column (header, body, footer) and the note
+editor / chat fill the middle region, so a resize reflows content without
+recomputing layout in React. During a drag the engine keeps a provisional size
+and writes the element's width/height directly; the document changes once on
+pointer-up. Edges, culling, hit testing and the spatial index use the draft size
+while the gesture is live. This is also why collapsing never overwrites the
+stored height.
+
+**One node, two modes.** Note and AI views share a node's id, position, size,
+parent and source reference. Toggling stores only `kind` (plus a one-time size
+bump when a default-sized note becomes a chat); the note body and chat are both
+retained. That keeps branching, deletion and persistence mode-agnostic.
+
+**Chat history and request state are separate.** The document owns durable
+turns; the session store owns tokens in flight. Writing each delta into the
+document would schedule autosave and canvas work at token rate and make undo
+semantics strange. The trade-off is that a hard refresh mid-response loses the
+partial text; the user's message is already saved, and a stopped response is
+kept and marked interrupted.
+
+**The API key is browser-local user configuration, not canvas data.** It is
+stored under a separate localStorage key, never serialised into the document,
+and sent only to the provider from the browser. This is the honest trade-off for
+a backend-free app: the key is readable by anyone with access to the browser
+profile, which the settings dialog states. Requests use the provider's
+browser-access header; the SDK is loaded lazily on first send so the initial
+canvas bundle stays lean.
+
+**Provider transport is isolated.** `ai/chatService.ts` is the only module that
+imports the OpenAI SDK. Any OpenAI-compatible base URL works; a provider with a
+different protocol or the planned autocomplete/Q&A surfaces can be added behind
+the same boundary without touching graph, canvas or editor code. Refusals, auth
+failures, rate limits and connection errors are mapped to specific user-facing
+messages.
+
 **The document is an immutable `Record<NodeId, NoteNode>`.** Every operation
 copies the node map. That is O(n) per edit — measured at ~0.7 ms with 5,000
 nodes, comfortably inside a keystroke budget — and it buys trivial structural
@@ -233,33 +353,45 @@ current model; a persistent map would remove it if it ever matters.
 
 ## Testing and measured performance
 
-187 tests across domain, canvas, editor, persistence, AI state and integration
-layers:
+275 tests across domain, canvas, editor, persistence, AI, settings and
+integration layers:
 
 ```
 graphOperations   root creation, branching at any depth, 50-child limit (per node),
                   character limit, deletion semantics, source-reference staleness,
                   integrity after hundreds of branches
+window modes      note ⇄ AI preservation, default-size bump, resize clamping,
+                  chat append/limit rules, message-scoped source references
 history           patch inversion, typing coalescing, redo invalidation, subtree restore
-layout            deterministic placement, no sibling overlap across 50 children
-graphValidation   plan/stats, malformed documents, repair rules
+layout            deterministic placement, no sibling overlap across 50 children,
+                  placement past resized parents
+graphValidation   plan/stats, malformed documents, repair rules, size and chat repair
 camera            world↔screen round trips, zoom-around-cursor anchoring, clamping,
                   fit, ensure-visible
 spatialIndex      insert/update/remove/query, multi-cell spans, 5,000-node timing
 renderer          every LOD tier and node state (via a recording 2D context),
-                  culling, edge geometry, layout cache
+                  AI previews, culling, edge geometry, layout cache
 engine            gestures, drag commit-once, marquee, wheel zoom anchoring,
                   camera/overlay sync, floating-action placement and clamping,
                   draft flush
-editor            limit trimming (typing, paste, over-limit), selection geometry,
+note editor       limit trimming (typing, paste, over-limit), selection geometry,
                   HTML-escaping in the measurement mirror
+chat selection    UTF-16 offsets within a reply, cross-message rejection
 persistence       IndexedDB round trips, emergency mirror recovery, migrations,
                   debounced autosave, status transitions, write serialisation,
-                  failure surfacing, restoration
-ai                per-node session isolation, late-response rejection, scoped cancel,
-                  context budgeting
-integration       the full workflow: type → highlight → branch → edit → grandchild
-                  → move → reload → verify, plus limits, deletion preview and undo
+                  failure surfacing, restoration, AI mode/size/chat round trip
+ai settings       local persistence, key clearing, malformed storage, legacy migration,
+                  full model list in the select, effort levels for reasoning models
+ai models         /models parsing, effort metadata, family inference, deduplication
+ai transport      provider error-to-message mapping
+ai runtime        per-node isolation, concurrent streaming, superseded-response
+                  rejection, scoped cancel, partial-response retention, retry,
+                  concurrency cap, no-key and note-mode guards
+ai context        history budgeting, ancestor clipping, other-window exclusion
+integration       the full note workflow (type → highlight → branch → edit →
+                  grandchild → move → reload → verify), plus AI branching and
+                  reload of mode/size/conversation; UI mode toggle, corner resize
+                  and settings persistence
 ```
 
 Measured on this machine (Node 25, Vitest, 5,000-node synthetic graph). These
@@ -274,7 +406,7 @@ below are the per-frame costs the renderer pays, printed by
 | Marquee query | **0.1 ms** |
 | Cached text-layout lookup, 400 notes | **< 0.1 ms** |
 | Single-node content update at 5,000 nodes | **0.7 ms** |
-| Build a 5,000-node graph (bulk path) | 0.3–0.6 s |
+| Build a 5,000-node graph (bulk path) | 0.3–0.7 s |
 | Validate a 5,000-node graph | 77 ms |
 
 Culling at 0.2 ms leaves the whole 16.7 ms frame budget for painting, and the
@@ -294,23 +426,30 @@ __lumieresStress(5000)
 
 ---
 
-## AI readiness
+## AI implementation and future seam
 
-No AI is implemented. What exists is the shape it will need, so nothing has to
-be rewritten:
+AI chat is implemented. What is deliberately still future-facing:
 
-- `ai/types.ts` — `NodeAISession` keyed by node id, `AIMessage`, request ids,
-  context budgets. Sessions are per node by construction; there is no global
-  conversation object anywhere.
-- `ai/sessionStore.ts` — a working, tested state container: concurrent requests
-  on different nodes, per-node cancellation, and rejection of a late response
-  whose request id has been superseded. No transport, no network.
-- `ai/context.ts` — selective context assembly: nearest ancestors first, under a
-  character budget, with a floor that stops it padding a request with slivers
-  from a dozen ancestors. Ancestors are excerpts, never concatenated in full.
-- `ai/serviceInterface.ts` — the `AIService` boundary
-  (`autocomplete` / `ask` / `cancel`) plus a registry that returns `null` today.
-  Because it is null, every AI affordance is absent rather than faked.
+- **Provider** — the implemented transport speaks OpenAI's Chat Completions
+  protocol, so any OpenAI-compatible service works through the base-URL setting.
+  A provider that requires a different request shape would be added behind
+  `ai/chatService.ts`; graph, canvas, editor and persistence stay
+  provider-agnostic.
+- **Autocomplete and non-chat Q&A** — not implemented and not faked.
+  `ai/serviceInterface.ts` keeps the documented `AIService` boundary for them,
+  and `ai/context.ts` keeps the selective, budgeted context assembly they need.
+- **Per-window isolation** — `ai/chatRuntime.ts` and `ai/sessionStore.ts` already
+  implement independent request lifecycles, scoped cancellation, late-response
+  rejection and a bounded concurrency cap. The UI never sees a global chat state.
+- **Context lineage** — each request gets this window's note body, source
+  snapshot (with staleness), clipped nearest ancestors and its own recent turns.
+  No other window's conversation is ever included.
+
+`dangerouslyAllowBrowser` is required for a backend-free app; direct browser
+requests also depend on the provider allowing CORS. The key is treated accordingly: browser-local,
+user-managed and explicitly warned about. If the app later gains a backend, the
+same `chatService` boundary can move the request server-side without changing
+the document, UI or runtime.
 
 ---
 
@@ -328,8 +467,29 @@ be rewritten:
   child window, 60% zoom, and a window scrolled past the top of the viewport);
   when a window's header is scrolled out of view the action is pinned to the
   viewport's top edge, where it does overlap the first visible lines.
-- **Rich text is not supported.** Notes are plain text by design; the character
-  limit and selection offsets are exact because of it.
+- **Rich text is not supported.** Notes and chat replies are plain text by
+  design; the character limit and selection offsets are exact because of it.
+  Markdown in model output is therefore shown literally, and the system prompt
+  asks for plain text.
+- **Chat turns are not undoable.** Notes, branches, moves, mode switches and
+  resizes are. A conversation is history rather than an edit; deleting it means
+  deleting the window. There is no separate "clear conversation" action yet.
+- **Conversations grow without a turn cap.** Requests send only the recent turns
+  under a character budget, but the full history stays in the document (and in
+  exports) until the window is deleted.
+- **Live provider calls are not exercised by the test suite.** Runtime isolation,
+  streaming plumbing, cancellation, context assembly and settings are unit
+  tested with injected transports; a real request requires the user's key and a
+  network. Error mapping and `/models` parsing are explicit, but the live
+  browser→provider round trip was not run in this environment.
+- **A refresh during a stream loses the partial reply.** The user's turn is
+  already persisted; a stopped reply (Stop button) is kept and marked
+  interrupted.
+- **Very large documents skip the localStorage emergency mirror** (it is capped
+  at 900 KB). IndexedDB remains the primary store; the mirror only exists to
+  rescue an unload race when the payload fits.
 - **No collaboration, sync, auth or backend**, per the brief.
 - **The 5,000-node figures are per-operation costs, not frame rates** — see the
-  note under the performance table.
+  note under the performance table. AI windows add a small preview cost
+  (conversation tail truncated before text layout) but do not add React nodes
+  until one is opened.

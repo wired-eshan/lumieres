@@ -61,6 +61,42 @@ if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
+/**
+ * jsdom has no PointerEvent. The resize handle is driven by pointer events, so
+ * provide a minimal MouseEvent-derived implementation and harmless pointer
+ * capture methods. Only tests that dispatch a pointer sequence need these.
+ */
+if (typeof window !== 'undefined' && typeof window.PointerEvent === 'undefined') {
+  class PointerEventPolyfill extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    readonly isPrimary: boolean;
+
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 1;
+      this.pointerType = init.pointerType ?? 'mouse';
+      this.isPrimary = init.isPrimary ?? true;
+    }
+  }
+  Object.defineProperty(window, 'PointerEvent', {
+    value: PointerEventPolyfill,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(globalThis, 'PointerEvent', {
+    value: PointerEventPolyfill,
+    configurable: true,
+    writable: true,
+  });
+}
+
+if (typeof Element !== 'undefined' && !Element.prototype.setPointerCapture) {
+  Element.prototype.setPointerCapture = () => undefined;
+  Element.prototype.releasePointerCapture = () => undefined;
+  Element.prototype.hasPointerCapture = () => false;
+}
+
 if (typeof window !== 'undefined' && !isFunctional(window.localStorage)) {
   Object.defineProperty(window, 'localStorage', {
     value: createMemoryStorage(),

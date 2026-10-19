@@ -18,6 +18,7 @@ import { CanvasEngine } from '../canvas/engine';
 import { graphController } from '../graph/graphController';
 import { useGraphStore } from '../graph/graphStore';
 import { createEmptyDocument } from '../graph/graphOperations';
+import { DEFAULT_AI_SETTINGS, saveAISettings } from '../ai/settings';
 
 let container: HTMLDivElement;
 let root: Root;
@@ -33,6 +34,7 @@ function typeIntoField(field: HTMLTextAreaElement | HTMLInputElement, value: str
 
 beforeEach(() => {
   useGraphStore.getState().replaceDocument(createEmptyDocument('Smoke'), { resetHistory: true });
+  saveAISettings({ ...DEFAULT_AI_SETTINGS });
   engine = new CanvasEngine(graphController);
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -113,8 +115,98 @@ describe('application shell', () => {
     });
 
     const toolbar = container.querySelector('.node-toolbar');
-    const branchButton = toolbar?.querySelector<HTMLButtonElement>('button[aria-label="Create a branch from this note"]');
+    const branchButton = toolbar?.querySelector<HTMLButtonElement>('button[aria-label="Create a branch from this window"]');
     expect(branchButton?.disabled).toBe(true);
     expect(branchButton?.title).toContain('Branch limit reached');
+  });
+
+  it('toggles an open window between note and AI without losing its content', async () => {
+    renderApp();
+    await act(async () => {});
+    const rootId = engine.doc.rootNodeId;
+
+    await act(async () => {
+      engine.startEditing(rootId);
+    });
+    const textarea = container.querySelector<HTMLTextAreaElement>('.note-window__body');
+    if (!textarea) throw new Error('note editor missing');
+    await act(async () => {
+      typeIntoField(textarea, 'Context kept across modes');
+    });
+    await act(async () => {
+      engine.flushDraft({ immediate: true });
+    });
+
+    const aiToggle = container.querySelector<HTMLButtonElement>('button[title="AI conversation mode"]');
+    if (!aiToggle) throw new Error('AI mode toggle missing');
+    await act(async () => {
+      aiToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(useGraphStore.getState().doc.nodes[rootId]?.kind).toBe('ai');
+    expect(useGraphStore.getState().doc.nodes[rootId]?.content).toBe('Context kept across modes');
+    expect(container.querySelector('.ai-chat')).not.toBeNull();
+    expect(container.querySelector('.note-window__body')).toBeNull();
+    // With no key configured, the window explains the state and refuses to send.
+    expect(container.querySelector('.ai-chat__notice')).not.toBeNull();
+    expect(container.querySelector<HTMLButtonElement>('.ai-chat__send')?.disabled).toBe(true);
+
+    const noteToggle = container.querySelector<HTMLButtonElement>('button[title="Note mode"]');
+    if (!noteToggle) throw new Error('note mode toggle missing');
+    await act(async () => {
+      noteToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(useGraphStore.getState().doc.nodes[rootId]?.kind).toBe('note');
+    expect(container.querySelector<HTMLTextAreaElement>('.note-window__body')?.value).toBe(
+      'Context kept across modes',
+    );
+  });
+
+  it('resizes a window by dragging its corner and commits one document change', async () => {
+    renderApp();
+    await act(async () => {});
+    const rootId = engine.doc.rootNodeId;
+    await act(async () => {
+      engine.startEditing(rootId);
+    });
+
+    const handle = container.querySelector<HTMLButtonElement>('.note-window__resize');
+    if (!handle) throw new Error('resize handle missing');
+    const before = useGraphStore.getState().doc.nodes[rootId]?.size;
+    if (!before) throw new Error('node missing');
+
+    await act(async () => {
+      handle.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerId: 1, clientX: 100, clientY: 100 }));
+      handle.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerId: 1, clientX: 180, clientY: 160 }));
+      handle.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1, clientX: 180, clientY: 160 }));
+    });
+
+    const after = useGraphStore.getState().doc.nodes[rootId]?.size;
+    expect(after?.width).toBe(before.width + 80);
+    expect(after?.height).toBe(before.height + 60);
+  });
+
+  it('opens AI settings and stores a key locally', async () => {
+    renderApp();
+    await act(async () => {});
+
+    const settingsButton = container.querySelector<HTMLButtonElement>('button[aria-label="AI settings"]');
+    if (!settingsButton) throw new Error('settings button missing');
+    await act(async () => {
+      settingsButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const dialog = container.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    const keyInput = container.querySelector<HTMLInputElement>('.settings__input[type="password"]');
+    if (!keyInput) throw new Error('key field missing');
+    await act(async () => {
+      typeIntoField(keyInput, 'sk-ant-test-key');
+      container.querySelector<HTMLFormElement>('form.settings')?.dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      );
+    });
+
+    expect(window.localStorage.getItem('lumieres:ai-settings')).toContain('sk-ant-test-key');
   });
 });

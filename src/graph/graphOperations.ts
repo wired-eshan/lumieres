@@ -8,13 +8,14 @@
  */
 
 import { createDocumentId, createEdgeId, createNodeId } from '../utils/id';
-import { nodeSize } from './metrics';
+import { clampNodeSize, defaultNodeSize, nodeSize } from './metrics';
 import {
   MAX_CHILDREN_PER_NODE,
   MAX_NODE_CONTENT_LENGTH,
   SCHEMA_VERSION,
   err,
   ok,
+  type ChatMessage,
   type GraphDocument,
   type GraphEdge,
   type NodeId,
@@ -24,6 +25,8 @@ import {
   type Rect,
   type SourceReference,
   type SourceReferenceEvaluation,
+  type WindowKind,
+  type WindowSize,
 } from './types';
 
 const ROOT_POSITION: Point = { x: 0, y: 0 };
@@ -38,16 +41,23 @@ export function createNoteNode(input: {
   title?: string;
   content?: string;
   position: Point;
+  kind?: WindowKind;
+  size?: WindowSize;
+  chat?: ChatMessage[];
   sourceReference?: SourceReference | null;
   now?: number;
 }): NoteNode {
   const now = input.now ?? Date.now();
+  const kind = input.kind ?? 'note';
   return {
     id: input.id ?? createNodeId(),
     parentId: input.parentId,
     title: input.title ?? '',
     content: input.content ?? '',
     position: { x: input.position.x, y: input.position.y },
+    size: clampNodeSize(input.size ?? defaultNodeSize(kind)),
+    kind,
+    chat: input.chat ? input.chat.slice() : [],
     sourceReference: input.sourceReference ?? null,
     collapsed: false,
     contentVersion: 1,
@@ -189,17 +199,26 @@ export function compareRenderOrder(
 }
 
 export function getNodeRect(node: NoteNode): Rect {
-  const size = nodeSize(node.collapsed);
+  const size = nodeSize(node.collapsed, node.size);
   return { x: node.position.x, y: node.position.y, width: size.width, height: size.height };
 }
 
 export function getSubtreeCharCount(doc: GraphDocument, id: NodeId): number {
   const node = getNode(doc, id);
-  let total = node ? node.content.length + node.title.length : 0;
+  let total = node ? node.content.length + node.title.length + chatCharacters(node) : 0;
   for (const descendantId of getDescendantIds(doc, id)) {
     const descendant = getNode(doc, descendantId);
-    if (descendant) total += descendant.content.length + descendant.title.length;
+    if (descendant) {
+      total += descendant.content.length + descendant.title.length + chatCharacters(descendant);
+    }
   }
+  return total;
+}
+
+/** Chat text is part of what a deletion removes, so previews count it too. */
+function chatCharacters(node: NoteNode): number {
+  let total = 0;
+  for (const message of node.chat) total += message.content.length;
   return total;
 }
 
@@ -225,6 +244,17 @@ export function evaluateSourceReference(
 
   const source = getNode(doc, reference.sourceNodeId);
   if (!source) return { status: 'missing-source', reference, currentText: null };
+
+  // A branch can come from a note body or from one AI message. The reference
+  // names which, so offsets always index the same text they were captured from.
+  if (reference.sourceMessageId) {
+    const message = source.chat.find((candidate) => candidate.id === reference.sourceMessageId);
+    if (!message) return { status: 'stale', reference, currentText: null };
+    const currentText = message.content.slice(reference.startOffset, reference.endOffset);
+    return currentText === reference.selectedTextSnapshot
+      ? { status: 'valid', reference, currentText }
+      : { status: 'stale', reference, currentText };
+  }
 
   const currentText = source.content.slice(reference.startOffset, reference.endOffset);
   if (currentText === reference.selectedTextSnapshot) {
@@ -261,6 +291,8 @@ export interface CreateBranchInput {
   position: Point;
   title?: string;
   content?: string;
+  kind?: WindowKind;
+  size?: WindowSize;
   sourceReference?: SourceReference | null;
   id?: NodeId;
   now?: number;
@@ -281,7 +313,7 @@ export function createBranch(
   input: CreateBranchInput,
 ): OperationResult<CreateBranchValue> {
   const parent = getNode(doc, input.parentId);
-  if (!parent) return err('PARENT_NOT_FOUND', 'The source note no longer exists on this canvas.');
+  if (!parent) return err('PARENT_NOT_FOUND', 'The source window no longer exists on this canvas.');
   if (!Number.isFinite(input.position.x) || !Number.isFinite(input.position.y)) {
     return err('INVALID_POSITION', 'Branch position must be finite world coordinates.');
   }
@@ -290,7 +322,7 @@ export function createBranch(
   if (childCount >= MAX_CHILDREN_PER_NODE) {
     return err(
       'BRANCH_LIMIT_REACHED',
-      `This note already has ${MAX_CHILDREN_PER_NODE} branches, the maximum per note.`,
+      `This window already has ${MAX_CHILDREN_PER_NODE} branches, the maximum per window.`,
     );
   }
 
@@ -301,6 +333,8 @@ export function createBranch(
     title: input.title ?? '',
     content: input.content ?? '',
     position: input.position,
+    kind: input.kind ?? 'note',
+    ...(input.size !== undefined ? { size: input.size } : {}),
     sourceReference: input.sourceReference ?? null,
     now,
   });
@@ -417,6 +451,81 @@ export function setNodeCollapsed(
 }
 
 /**
+ * Switches a window between note and AI conversation.
+ *
+ * Content is never discarded: the note body remains the AI window's editable
+ * context (visible if the user switches back), and the conversation remains if
+ * they toggle back to a note. A window still at the default note size grows to
+ * the default chat size so the conversation is usable immediately; a size the
+ * user chose is left alone.
+ */
+export function setNodeKind(
+  doc: GraphDocument,
+  id: NodeId,
+  kind: WindowKind,
+  now = Date.now(),
+): OperationResult<{ doc: GraphDocument; node: NoteNode }> {
+  const node = getNode(doc, id);
+  if (!node) return err('NODE_NOT_FOUND', 'That window no longer exists.');
+  if (node.kind === kind) return ok({ doc, node });
+
+  const noteDefault = defaultNodeSize('note');
+  const atNoteDefault = node.size.width === noteDefault.width && node.size.height === noteDefault.height;
+  const size = kind === 'ai' && atNoteDefault ? defaultNodeSize('ai') : node.size;
+  const next: NoteNode = { ...node, kind, size, updatedAt: now };
+  return ok({ doc: withNode(doc, next, now), node: next });
+}
+
+export function resizeNode(
+  doc: GraphDocument,
+  id: NodeId,
+  size: WindowSize,
+  now = Date.now(),
+): OperationResult<{ doc: GraphDocument; node: NoteNode }> {
+  const node = getNode(doc, id);
+  if (!node) return err('NODE_NOT_FOUND', 'That window no longer exists.');
+  if (!Number.isFinite(size.width) || !Number.isFinite(size.height)) {
+    return err('INVALID_SIZE', 'Window size must be finite world units.');
+  }
+  const clamped = clampNodeSize(size);
+  if (node.size.width === clamped.width && node.size.height === clamped.height) {
+    return ok({ doc, node });
+  }
+  const next: NoteNode = { ...node, size: clamped, updatedAt: now };
+  return ok({ doc: withNode(doc, next, now), node: next });
+}
+
+/**
+ * Appends one chat turn. Chat history is part of the document (and therefore
+ * saved, exported and deleted with the window) but is deliberately outside the
+ * undo stack: a conversation is not a text edit, and replaying one exchange
+ * through undo would be surprising.
+ */
+export function appendChatMessage(
+  doc: GraphDocument,
+  id: NodeId,
+  message: ChatMessage,
+  now = Date.now(),
+): OperationResult<{ doc: GraphDocument; node: NoteNode }> {
+  const node = getNode(doc, id);
+  if (!node) return err('NODE_NOT_FOUND', 'That window no longer exists.');
+  if (message.content.length === 0) {
+    return err('INVALID_SELECTION', 'A chat message cannot be empty.');
+  }
+  if (message.role === 'user' && message.content.length > MAX_NODE_CONTENT_LENGTH) {
+    return err(
+      'CONTENT_LIMIT_EXCEEDED',
+      `A chat message can hold at most ${MAX_NODE_CONTENT_LENGTH.toLocaleString('en-US')} characters.`,
+    );
+  }
+  if (node.chat.some((existing) => existing.id === message.id)) {
+    return err('INVALID_SELECTION', 'That chat message already exists.');
+  }
+  const next: NoteNode = { ...node, chat: [...node.chat, message], updatedAt: now };
+  return ok({ doc: withNode(doc, next, now), node: next });
+}
+
+/**
  * Re-attaches a node to a new parent. Present so the tree can be edited without
  * hand-writing document shapes, even though the current UI only creates branches.
  */
@@ -498,7 +607,7 @@ export function deleteSubtree(
   const node = getNode(doc, id);
   if (!node) return err('NODE_NOT_FOUND', 'That note no longer exists.');
   if (id === doc.rootNodeId) {
-    return err('ROOT_DELETE_NOT_ALLOWED', 'The root note cannot be deleted. Reset the canvas instead.');
+    return err('ROOT_DELETE_NOT_ALLOWED', 'The root window cannot be deleted. Reset the canvas instead.');
   }
 
   const removedIds = new Set<NodeId>([id, ...getDescendantIds(doc, id)]);

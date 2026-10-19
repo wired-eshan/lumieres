@@ -13,7 +13,13 @@ import { describe, expect, it } from 'vitest';
 import { GraphRenderer, edgeGeometry, nodeRectAt } from './renderer';
 import { SpatialGrid } from './spatialIndex';
 import { TextLayoutCache } from './textLayout';
-import { createBranch, createEmptyDocument, updateNodeContent } from '../graph/graphOperations';
+import {
+  appendChatMessage,
+  createBranch,
+  createEmptyDocument,
+  setNodeKind,
+  updateNodeContent,
+} from '../graph/graphOperations';
 import { MAX_NODE_CONTENT_LENGTH, type GraphDocument, type Point } from '../graph/types';
 import { zoomTier } from './theme';
 import type { Camera } from './camera';
@@ -149,7 +155,9 @@ function withContent(doc: GraphDocument, id: string, content: string): GraphDocu
 function indexFor(doc: GraphDocument): SpatialGrid {
   const grid = new SpatialGrid(480);
   grid.rebuild(
-    Object.values(doc.nodes).map((node) => [node.id, nodeRectAt(node.position, node.collapsed)] as const),
+    Object.values(doc.nodes).map(
+      (node) => [node.id, nodeRectAt(node.position, node.collapsed, node.size)] as const,
+    ),
   );
   return grid;
 }
@@ -295,6 +303,46 @@ describe('canvas renderer', () => {
 
     // 20,012 characters against a 20,000 limit.
     expect(recording.texts().join(' | ')).toContain('20,012 / 20,000');
+  });
+
+  it('previews an AI window with its conversation and mode badge', () => {
+    const { doc, rootId } = buildGraph();
+    const ai = setNodeKind(doc, rootId, 'ai');
+    if (!ai.ok) throw new Error(ai.message);
+    const chat = appendChatMessage(ai.value.doc, rootId, {
+      id: 'm1',
+      role: 'assistant',
+      content: 'A conversation preview',
+      createdAt: 1,
+    });
+    if (!chat.ok) throw new Error(chat.message);
+
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+    renderer.draw(recording.ctx, frameFor(chat.value.doc, { x: -200, y: -300, zoom: 1 }));
+
+    const painted = recording.texts().join(' | ');
+    expect(painted).toContain('AI');
+    expect(painted).toContain('A conversation preview');
+    expect(painted).toContain('1 message');
+  });
+
+  it('draws a resized window without throwing', () => {
+    const { doc, rootId } = buildGraph();
+    const resized: GraphDocument = {
+      ...doc,
+      nodes: {
+        ...doc.nodes,
+        [rootId]: { ...doc.nodes[rootId]!, size: { width: 720, height: 600 } },
+      },
+    };
+
+    // Painting at high zoom must not throw and must use the larger rect for the
+    // frame border (a 720-wide window is wider than the default 340).
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+    renderer.draw(recording.ctx, frameFor(resized, { x: -300, y: -400, zoom: 1 }));
+    expect(recording.texts().join(' | ')).toContain('Root');
   });
 
   it('switches to simplified rendering when zoomed far out', () => {

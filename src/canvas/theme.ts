@@ -20,6 +20,8 @@ export const palette = {
   textMuted: '#98a0b5',
   textFaint: '#5f6779',
   accent: '#7c8cf8',
+  /** AI conversation windows, so mode is legible at a glance on the canvas. */
+  aiAccent: '#b79cff',
   accentSoft: 'rgba(124,140,248,0.14)',
   rootAccent: '#5fd3bd',
   edge: '#333c52',

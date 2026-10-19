@@ -32,24 +32,33 @@ export interface AISessionStoreSnapshot {
 
 export class AISessionStore {
   private sessions = new Map<NodeId, NodeAISession>();
+  /** Stable empty sessions keep `useSyncExternalStore` snapshots referentially equal. */
+  private emptySessions = new Map<NodeId, NodeAISession>();
   private listeners = new Set<() => void>();
 
-  subscribe(listener: () => void): () => void {
+  subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
+  };
 
   private notify(): void {
     for (const listener of this.listeners) listener();
   }
 
   private replace(nodeId: NodeId, session: NodeAISession): void {
+    this.emptySessions.delete(nodeId);
     this.sessions.set(nodeId, { ...session, updatedAt: Date.now() });
     this.notify();
   }
 
   getSession(nodeId: NodeId): NodeAISession {
-    return this.sessions.get(nodeId) ?? createEmptySession(nodeId);
+    const existing = this.sessions.get(nodeId);
+    if (existing) return existing;
+    const cached = this.emptySessions.get(nodeId);
+    if (cached) return cached;
+    const empty = createEmptySession(nodeId);
+    this.emptySessions.set(nodeId, empty);
+    return empty;
   }
 
   getSnapshot(): AISessionStoreSnapshot {
@@ -166,11 +175,16 @@ export class AISessionStore {
 
   /** Drops a node's session entirely (window closed). */
   disposeSession(nodeId: NodeId): void {
+    this.emptySessions.delete(nodeId);
     if (this.sessions.delete(nodeId)) this.notify();
   }
 
   clear(): void {
     this.sessions.clear();
+    this.emptySessions.clear();
     this.notify();
   }
 }
+
+/** Runtime sessions for the app. Tests construct isolated stores instead. */
+export const aiSessionStore = new AISessionStore();

@@ -16,10 +16,38 @@ export type NodeId = string;
 export type EdgeId = string;
 
 /** Bumped whenever the on-disk shape changes; see `persistence/migrations.ts`. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 /** Maximum direct children a single node may have. Applies per node, not per canvas. */
 export const MAX_CHILDREN_PER_NODE = 50;
+
+/**
+ * A window can show either a plain note or a chat with an LLM. Both modes share
+ * one document record, one identity, one branch position in the tree and one
+ * source reference; only the body region and its editing surface differ.
+ */
+export type WindowKind = 'note' | 'ai';
+
+/** Window dimensions in world coordinates. */
+export interface WindowSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * A persisted chat turn. Chat history lives in the graph document (so it is
+ * saved, exported, restored and deleted with its window), while in-flight
+ * request state lives in `ai/sessionStore.ts` and never touches storage per
+ * token.
+ */
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  createdAt: number;
+  /** True when the user stopped the response before it finished. */
+  interrupted?: boolean;
+}
 
 /**
  * Maximum characters in a single note body.
@@ -43,9 +71,16 @@ export interface NoteNode {
   id: NodeId;
   parentId: NodeId | null;
   title: string;
+  /** The note body. In AI mode this is preserved as editable context for the chat. */
   content: string;
   /** World coordinates of the window's top-left corner. Camera-independent. */
   position: { x: number; y: number };
+  /** Persisted world-space window size. Collapsing does not destroy it. */
+  size: WindowSize;
+  /** Note or AI conversation. Toggling preserves both `content` and `chat`. */
+  kind: WindowKind;
+  /** Persisted AI conversation for this window, oldest first. */
+  chat: ChatMessage[];
   sourceReference: SourceReference | null;
   collapsed: boolean;
   /**
@@ -71,7 +106,13 @@ export interface GraphEdge {
 export interface SourceReference {
   sourceNodeId: NodeId;
   selectedTextSnapshot: string;
-  /** UTF-16 offset into the source node's `content` at branch time. */
+  /**
+   * Set when the selection was made inside an AI message rather than in the
+   * window's note body. Offsets then index into that message's content, which
+   * keeps staleness detection exact without copying the message.
+   */
+  sourceMessageId?: string;
+  /** UTF-16 offset into the source text at branch time. */
   startOffset: number;
   /** Exclusive UTF-16 end offset. */
   endOffset: number;
@@ -103,6 +144,7 @@ export type GraphErrorCode =
   | 'INVALID_SELECTION'
   | 'ROOT_DELETE_NOT_ALLOWED'
   | 'INVALID_POSITION'
+  | 'INVALID_SIZE'
   | 'EMPTY_TITLE';
 
 export type OperationResult<T> =

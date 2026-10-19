@@ -13,7 +13,8 @@
  *  - shadows and rounded corners skipped at low zoom
  */
 
-import type { GraphDocument, NodeId, Point, Rect } from '../graph/types';
+import type { GraphDocument, NodeId, Point, Rect, WindowSize } from '../graph/types';
+import { MAX_NODE_CONTENT_LENGTH } from '../graph/types';
 import { compareRenderOrder, getNode, evaluateSourceReference } from '../graph/graphOperations';
 import {
   BODY_LINE_HEIGHT,
@@ -39,6 +40,8 @@ export interface RenderFrame {
   viewport: Viewport;
   /** Nodes with an in-flight drag offset; drawn at their provisional position. */
   draftPositions: ReadonlyMap<NodeId, Point>;
+  /** Windows with an in-flight resize; drawn at the provisional size. */
+  draftSizes?: ReadonlyMap<NodeId, WindowSize>;
   selectedIds: ReadonlySet<NodeId>;
   hoveredId: NodeId | null;
   editingNodeId: NodeId | null;
@@ -57,9 +60,13 @@ export interface RenderFrame {
 const CULL_PADDING = 240;
 const PULSE_DURATION = 1100;
 
-export function nodeRectAt(position: Point, collapsed: boolean): Rect {
-  const size = nodeSize(collapsed);
-  return { x: position.x, y: position.y, width: size.width, height: size.height };
+export function nodeRectAt(
+  position: Point,
+  collapsed: boolean,
+  size?: WindowSize,
+): Rect {
+  const node = nodeSize(collapsed, size);
+  return { x: position.x, y: position.y, width: node.width, height: node.height };
 }
 
 export interface RenderStats {
@@ -288,7 +295,7 @@ export class GraphRenderer {
       const isHovered = frame.hoveredId === node.id;
       const isEditing = frame.editingNodeId === node.id;
       const isRoot = node.id === doc.rootNodeId;
-      const overLimit = node.content.length > 20_000;
+      const overLimit = node.content.length > MAX_NODE_CONTENT_LENGTH;
       const pulsing =
         frame.pulse && frame.pulse.ids.has(node.id) && frame.now - frame.pulse.startedAt < PULSE_DURATION;
 
@@ -319,7 +326,7 @@ export class GraphRenderer {
         ctx.restore();
 
         // Accent stripe
-        ctx.fillStyle = isRoot ? palette.rootAccent : palette.accent;
+        ctx.fillStyle = isRoot ? palette.rootAccent : node.kind === 'ai' ? palette.aiAccent : palette.accent;
         ctx.globalAlpha = isSelected || isHovered || isEditing ? 1 : 0.7;
         pathRoundedRect(ctx, NODE_CONTENT_PADDING, 14, 3, NODE_HEADER_HEIGHT - 28, 1.5);
         ctx.fill();
@@ -340,6 +347,21 @@ export class GraphRenderer {
 
       if (showText) this.drawNodeContent(ctx, frame, node.id, rect, isRoot);
       else this.drawNodePlaceholder(ctx, rect);
+
+      // The selected, non-open window advertises the same corner-resize gesture
+      // the editor overlay offers with its DOM handle.
+      if (isSelected && !isEditing && !node.collapsed && showDetail) {
+        ctx.strokeStyle = palette.accent;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.moveTo(rect.width - 7, rect.height - 15);
+        ctx.lineTo(rect.width - 15, rect.height - 7);
+        ctx.moveTo(rect.width - 7, rect.height - 10);
+        ctx.lineTo(rect.width - 10, rect.height - 7);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
 
       if (pulsing && frame.pulse) {
         const t = clamp((frame.now - frame.pulse.startedAt) / PULSE_DURATION, 0, 1);
@@ -378,6 +400,7 @@ export class GraphRenderer {
 
     const contentWidth = rect.width - NODE_CONTENT_PADDING * 2;
     let cursorY: number;
+    const isAi = node.kind === 'ai';
 
     // Title
     const titleText = node.title.trim();
@@ -385,8 +408,20 @@ export class GraphRenderer {
     ctx.font = titleFont;
     ctx.fillStyle = titleText.length > 0 ? palette.text : palette.textFaint;
     ctx.textBaseline = 'middle';
-    const titleLabel = ellipsize(titleText.length > 0 ? titleText : 'Untitled note', titleFont, contentWidth - 6);
+    const badgeSpace = isAi && !node.collapsed ? 30 : 0;
+    const titleLabel = ellipsize(
+      titleText.length > 0 ? titleText : 'Untitled note',
+      titleFont,
+      contentWidth - 6 - badgeSpace,
+    );
     ctx.fillText(titleLabel, NODE_CONTENT_PADDING + (isRoot || !node.collapsed ? 10 : 0), NODE_HEADER_HEIGHT / 2);
+    if (isAi && !node.collapsed) {
+      ctx.font = fonts.label;
+      ctx.fillStyle = palette.aiAccent;
+      ctx.textAlign = 'right';
+      ctx.fillText('AI', rect.width - NODE_CONTENT_PADDING, NODE_HEADER_HEIGHT / 2);
+      ctx.textAlign = 'left';
+    }
     cursorY = NODE_HEADER_HEIGHT;
 
     if (node.collapsed) {
@@ -438,7 +473,7 @@ export class GraphRenderer {
     }
     cursorY = bodyTopOffset(Boolean(evaluation.reference));
 
-    // Body text
+    // Body text. AI windows preview their conversation rather than the note body.
     const bodyBox = {
       x: NODE_CONTENT_PADDING,
       y: cursorY,
@@ -446,9 +481,10 @@ export class GraphRenderer {
       height: rect.height - NODE_FOOTER_HEIGHT - cursorY - 6,
     };
     const maxLines = Math.max(1, Math.floor(bodyBox.height / BODY_LINE_HEIGHT));
+    const previewText = isAi ? chatPreview(node.chat) : node.content;
     const layout = textLayoutCache.get(
       `node:${nodeId}`,
-      node.content,
+      previewText,
       fonts.body,
       bodyBox.width,
       maxLines,
@@ -456,9 +492,13 @@ export class GraphRenderer {
 
     ctx.font = fonts.body;
     ctx.textBaseline = 'top';
-    if (node.content.length === 0) {
+    if (previewText.length === 0) {
       ctx.fillStyle = palette.textFaint;
-      ctx.fillText('Empty note — start typing', bodyBox.x, bodyBox.y + 2);
+      ctx.fillText(
+        isAi ? 'AI conversation — open to chat' : 'Empty note — start typing',
+        bodyBox.x,
+        bodyBox.y + 2,
+      );
     } else {
       ctx.fillStyle = palette.text;
       let y = bodyBox.y;
@@ -471,7 +511,8 @@ export class GraphRenderer {
       }
     }
 
-    // Footer: character budget + branch budget.
+    // Footer: character budget for notes, turn count for conversations, plus the
+    // branch budget that applies to both.
     const footerY = rect.height - NODE_FOOTER_HEIGHT;
     ctx.strokeStyle = palette.nodeBorder;
     ctx.lineWidth = 1;
@@ -482,10 +523,24 @@ export class GraphRenderer {
 
     ctx.font = fonts.mono;
     ctx.textBaseline = 'middle';
-    const charCount = node.content.length;
-    const overLimit = charCount > 20_000;
-    ctx.fillStyle = overLimit ? palette.danger : palette.textFaint;
-    ctx.fillText(`${charCount.toLocaleString('en-US')} / 20,000`, NODE_CONTENT_PADDING, footerY + NODE_FOOTER_HEIGHT / 2);
+    if (isAi) {
+      ctx.fillStyle = palette.textFaint;
+      const turns = node.chat.length;
+      ctx.fillText(
+        `${turns.toLocaleString('en-US')} message${turns === 1 ? '' : 's'}`,
+        NODE_CONTENT_PADDING,
+        footerY + NODE_FOOTER_HEIGHT / 2,
+      );
+    } else {
+      const charCount = node.content.length;
+      const overLimit = charCount > MAX_NODE_CONTENT_LENGTH;
+      ctx.fillStyle = overLimit ? palette.danger : palette.textFaint;
+      ctx.fillText(
+        `${charCount.toLocaleString('en-US')} / ${MAX_NODE_CONTENT_LENGTH.toLocaleString('en-US')}`,
+        NODE_CONTENT_PADDING,
+        footerY + NODE_FOOTER_HEIGHT / 2,
+      );
+    }
 
     const children = countChildren(doc, nodeId);
     if (children > 0) {
@@ -530,7 +585,8 @@ export class GraphRenderer {
     const node = frame.doc.nodes[id];
     if (!node) return null;
     const draft = frame.draftPositions.get(id);
-    return nodeRectAt(draft ?? node.position, node.collapsed);
+    const draftSize = frame.draftSizes?.get(id);
+    return nodeRectAt(draft ?? node.position, node.collapsed, draftSize ?? node.size);
   }
 
   private toScreen(camera: Camera, point: Point): Point {
@@ -639,4 +695,19 @@ function countChildren(doc: GraphDocument, id: NodeId): number {
   let count = 0;
   for (const node of Object.values(doc.nodes)) if (node.parentId === id) count += 1;
   return count;
+}
+
+/**
+ * Canvas preview for an AI window. Only the tail is rendered (the cache caps by
+ * lines anyway), so building the string stays cheap even for long sessions.
+ */
+function chatPreview(messages: GraphDocument['nodes'][NodeId]['chat']): string {
+  const tail = messages.slice(-6);
+  return tail
+    .map((message) => {
+      const text =
+        message.content.length > 700 ? `${message.content.slice(0, 700)}…` : message.content;
+      return `${message.role === 'user' ? 'You' : 'AI'}: ${text}`;
+    })
+    .join('\n\n');
 }

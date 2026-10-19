@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { deserializeDocument, migrateDocument, serializeDocument } from './migrations';
-import { createBranch, createEmptyDocument, updateNodeContent } from '../graph/graphOperations';
+import {
+  appendChatMessage,
+  createBranch,
+  createEmptyDocument,
+  resizeNode,
+  setNodeKind,
+  updateNodeContent,
+} from '../graph/graphOperations';
 import { isValidGraph, validateGraph } from '../graph/graphValidation';
+import { MAX_NODE_HEIGHT, NODE_HEIGHT, NODE_WIDTH } from '../graph/metrics';
 import { MAX_NODE_CONTENT_LENGTH, SCHEMA_VERSION, type GraphDocument } from '../graph/types';
 
 function sampleDocument(): GraphDocument {
@@ -177,5 +185,134 @@ describe('document migration', () => {
     const reference = result.doc?.nodes['child']?.sourceReference;
     expect(reference?.startOffset).toBe(8);
     expect(reference?.endOffset).toBeGreaterThanOrEqual(8);
+  });
+
+  it('round-trips window mode, size and conversation', () => {
+    let doc = createEmptyDocument('AI round trip');
+    const nodeId = doc.rootNodeId;
+    const ai = setNodeKind(doc, nodeId, 'ai');
+    if (!ai.ok) throw new Error(ai.message);
+    doc = ai.value.doc;
+    const chat = appendChatMessage(doc, nodeId, {
+      id: 'm1',
+      role: 'user',
+      content: 'What should I read next?',
+      createdAt: 1234,
+    });
+    if (!chat.ok) throw new Error(chat.message);
+    doc = chat.value.doc;
+    const resized = resizeNode(doc, nodeId, { width: 520, height: 610 });
+    if (!resized.ok) throw new Error(resized.message);
+    doc = resized.value.doc;
+
+    const result = migrateDocument(JSON.parse(serializeDocument(doc)));
+    const restored = result.doc?.nodes[nodeId];
+    expect(restored?.kind).toBe('ai');
+    expect(restored?.size).toEqual({ width: 520, height: 610 });
+    expect(restored?.chat).toEqual([
+      { id: 'm1', role: 'user', content: 'What should I read next?', createdAt: 1234 },
+    ]);
+    expect(isValidGraph(result.doc as GraphDocument)).toBe(true);
+  });
+
+  it('upgrades a schema-1 document with default note mode and size', () => {
+    const result = migrateDocument({
+      schemaVersion: 1,
+      id: 'doc_v1',
+      title: 'Old',
+      rootNodeId: 'root',
+      nodes: { root: { id: 'root', parentId: null, content: 'kept' } },
+      edges: {},
+    });
+
+    const root = result.doc?.nodes['root'];
+    expect(result.fromVersion).toBe(1);
+    expect(result.doc?.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(root?.kind).toBe('note');
+    expect(root?.size).toEqual({ width: NODE_WIDTH, height: NODE_HEIGHT });
+    expect(root?.chat).toEqual([]);
+    expect(result.notes.join(' ')).toContain('schema 2');
+  });
+
+  it('clamps malformed window sizes instead of rejecting the document', () => {
+    const result = migrateDocument({
+      schemaVersion: SCHEMA_VERSION,
+      id: 'doc_size',
+      title: 'Bad size',
+      rootNodeId: 'root',
+      nodes: {
+        root: {
+          id: 'root',
+          parentId: null,
+          // A non-finite dimension falls back to the default; finite but
+          // out-of-range dimensions are clamped.
+          size: { width: Number.POSITIVE_INFINITY, height: 9000 },
+        },
+      },
+      edges: {},
+    });
+
+    const size = result.doc?.nodes['root']?.size;
+    expect(size?.width).toBe(NODE_WIDTH);
+    expect(size?.height).toBe(MAX_NODE_HEIGHT);
+    expect(isValidGraph(result.doc as GraphDocument)).toBe(true);
+  });
+
+  it('preserves the AI message id on a source reference', () => {
+    const result = migrateDocument({
+      schemaVersion: SCHEMA_VERSION,
+      id: 'doc_ai_ref',
+      title: 'AI reference',
+      rootNodeId: 'root',
+      nodes: {
+        root: { id: 'root', parentId: null, kind: 'ai' },
+        child: {
+          id: 'child',
+          parentId: 'root',
+          sourceReference: {
+            sourceNodeId: 'root',
+            sourceMessageId: 'assistant-1',
+            selectedTextSnapshot: 'branch me',
+            startOffset: 4,
+            endOffset: 13,
+            sourceContentVersion: 1,
+          },
+        },
+      },
+      edges: {},
+    });
+
+    expect(result.doc?.nodes['child']?.sourceReference?.sourceMessageId).toBe('assistant-1');
+    expect(isValidGraph(result.doc as GraphDocument)).toBe(true);
+  });
+
+  it('drops malformed chat turns but keeps the rest of the conversation', () => {
+    const result = migrateDocument({
+      schemaVersion: SCHEMA_VERSION,
+      id: 'doc_chat',
+      title: 'Chat',
+      rootNodeId: 'root',
+      nodes: {
+        root: {
+          id: 'root',
+          parentId: null,
+          kind: 'ai',
+          chat: [
+            { id: 'ok', role: 'user', content: 'kept', createdAt: 5 },
+            { id: 'bad-role', role: 'system', content: 'nope' },
+            { id: 'bad-content', role: 'assistant', content: 42 },
+            { role: 'assistant', content: 'missing id gets generated' },
+          ],
+        },
+      },
+      edges: {},
+    });
+
+    const chat = result.doc?.nodes['root']?.chat ?? [];
+    expect(chat.map((message) => message.content)).toEqual([
+      'kept',
+      'missing id gets generated',
+    ]);
+    expect(chat.every((message) => message.id.length > 0)).toBe(true);
   });
 });

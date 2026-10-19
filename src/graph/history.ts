@@ -15,7 +15,16 @@ import type { GraphDocument, GraphEdge, NodeId, NoteNode } from './types';
 export type NodeFieldPatch = Partial<
   Pick<
     NoteNode,
-    'title' | 'content' | 'position' | 'collapsed' | 'contentVersion' | 'updatedAt' | 'parentId' | 'sourceReference'
+    | 'title'
+    | 'content'
+    | 'position'
+    | 'size'
+    | 'kind'
+    | 'collapsed'
+    | 'contentVersion'
+    | 'updatedAt'
+    | 'parentId'
+    | 'sourceReference'
   >
 >;
 

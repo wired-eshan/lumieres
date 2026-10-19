@@ -280,6 +280,48 @@ describe('gestures', () => {
     expect(useGraphStore.getState().doc.nodes[rootId]?.position).toEqual(before);
   });
 
+  it('resizes a selected painted window from its corner and commits once', async () => {
+    const { engine } = mountEngine();
+    const rootId = engine.doc.rootNodeId;
+    engine.setSelection([rootId]);
+    const before = useGraphStore.getState().doc.nodes[rootId]?.size;
+    if (!before) throw new Error('root missing');
+
+    // Bottom-right corner of the root window (world 0,0 + 340x268).
+    const corner = { x: ORIGIN_SCREEN.x + before.width - 8, y: ORIGIN_SCREEN.y + before.height - 8 };
+    engine.pointerDown(corner, noModifiers);
+    engine.pointerMove({ x: corner.x + 60, y: corner.y + 40 });
+
+    // Mid-gesture, the document still has the old size; the engine draws a draft.
+    expect(useGraphStore.getState().doc.nodes[rootId]?.size).toEqual(before);
+
+    engine.pointerUp();
+    await waitForFrame();
+
+    expect(useGraphStore.getState().doc.nodes[rootId]?.size).toEqual({
+      width: before.width + 60,
+      height: before.height + 40,
+    });
+    // Resizing must not move the window or change its position deliberately.
+    expect(useGraphStore.getState().doc.nodes[rootId]?.position).toEqual({ x: 0, y: 0 });
+  });
+
+  it('cancelling a corner resize restores the committed size', async () => {
+    const { engine } = mountEngine();
+    const rootId = engine.doc.rootNodeId;
+    engine.setSelection([rootId]);
+    const before = useGraphStore.getState().doc.nodes[rootId]?.size;
+    if (!before) throw new Error('root missing');
+
+    const corner = { x: ORIGIN_SCREEN.x + before.width - 8, y: ORIGIN_SCREEN.y + before.height - 8 };
+    engine.pointerDown(corner, noModifiers);
+    engine.pointerMove({ x: corner.x + 120, y: corner.y + 90 });
+    engine.cancelGesture();
+    await waitForFrame();
+
+    expect(useGraphStore.getState().doc.nodes[rootId]?.size).toEqual(before);
+  });
+
   it('marquee-selects the windows inside the dragged rectangle', async () => {
     const { doc, childId } = withChild();
     const { engine } = mountEngine(doc);

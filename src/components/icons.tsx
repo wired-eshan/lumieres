@@ -171,3 +171,56 @@ export function ParentIcon(props: IconProps): ReactNode {
     </Svg>
   );
 }
+
+export function SettingsIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <circle cx="8" cy="8" r="2.2" />
+      <path d="M8 2.4v1.4M8 12.2v1.4M2.4 8h1.4M12.2 8h1.4M4.05 4.05l1 1M10.95 10.95l1 1M11.95 4.05l-1 1M5.05 10.95l-1 1" />
+    </Svg>
+  );
+}
+
+export function ChatIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <path d="M3 4.2h10v7H7.4L4.6 13.4v-2.2H3z" />
+      <path d="M5.8 7.7h4.4" />
+    </Svg>
+  );
+}
+
+export function NoteIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <path d="M4 2.6h5.4L12.8 6v7.4H4z" />
+      <path d="M9.2 2.8V6h3.4M6 8.6h4.4M6 11h3.2" />
+    </Svg>
+  );
+}
+
+export function SendIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <path d="M2.6 8 13.4 2.8 10.8 13l-2.6-3.4z" />
+      <path d="M8.2 9.6 13.4 2.8" />
+    </Svg>
+  );
+}
+
+export function StopIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.4" />
+    </Svg>
+  );
+}
+
+export function KeyIcon(props: IconProps): ReactNode {
+  return (
+    <Svg {...props}>
+      <circle cx="5.2" cy="10.8" r="2.4" />
+      <path d="M7 9 12.8 3.2M10.6 5.4l1.6 1.6M9.2 6.8l1.4 1.4" />
+    </Svg>
+  );
+}

@@ -6,8 +6,9 @@
  */
 
 import { createEdgeId } from '../utils/id';
+import { MAX_NODE_WIDTH, MIN_NODE_HEIGHT, MIN_NODE_WIDTH, MAX_NODE_HEIGHT, clampNodeSize, defaultNodeSize } from './metrics';
 import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH, SCHEMA_VERSION } from './types';
-import type { GraphDocument, NodeId, NoteNode } from './types';
+import type { ChatMessage, GraphDocument, NodeId, NoteNode } from './types';
 
 export interface ValidationIssue {
   severity: 'error' | 'warning';
@@ -20,6 +21,7 @@ export interface ValidationIssue {
     | 'CHILD_LIMIT_EXCEEDED'
     | 'CONTENT_LIMIT_EXCEEDED'
     | 'INVALID_POSITION'
+    | 'INVALID_SIZE'
     | 'DUPLICATE_ROOT';
   message: string;
   nodeId?: NodeId;
@@ -80,6 +82,23 @@ export function validateGraph(doc: GraphDocument): ValidationIssue[] {
         severity: 'error',
         code: 'INVALID_POSITION',
         message: `Node "${label(node)}" has a non-finite position.`,
+        nodeId: node.id,
+      });
+    }
+    const size = node.size;
+    if (
+      !size ||
+      !Number.isFinite(size.width) ||
+      !Number.isFinite(size.height) ||
+      size.width < MIN_NODE_WIDTH ||
+      size.width > MAX_NODE_WIDTH ||
+      size.height < MIN_NODE_HEIGHT ||
+      size.height > MAX_NODE_HEIGHT
+    ) {
+      issues.push({
+        severity: 'error',
+        code: 'INVALID_SIZE',
+        message: `Node "${label(node)}" has an unsupported window size.`,
         nodeId: node.id,
       });
     }
@@ -178,6 +197,7 @@ export function computeStats(doc: GraphDocument): GraphStats {
   const overLimitNodeIds: NodeId[] = [];
   for (const node of nodes) {
     totalCharacters += node.content.length;
+    for (const message of node.chat) totalCharacters += message.content.length;
     if (node.content.length > MAX_NODE_CONTENT_LENGTH) overLimitNodeIds.push(node.id);
   }
 
@@ -209,12 +229,16 @@ export function normalizeDocument(doc: GraphDocument): { doc: GraphDocument; iss
 
   const nodes: Record<NodeId, NoteNode> = {};
   for (const [id, node] of Object.entries(doc.nodes)) {
+    const kind = node.kind === 'ai' ? 'ai' : 'note';
     nodes[id] = {
       ...node,
       position: {
         x: Number.isFinite(node.position.x) ? node.position.x : 0,
         y: Number.isFinite(node.position.y) ? node.position.y : 0,
       },
+      size: clampNodeSize(node.size ?? defaultNodeSize(kind)),
+      kind,
+      chat: sanitizeChat(node.chat),
       content: typeof node.content === 'string' ? node.content : '',
       title: typeof node.title === 'string' ? node.title : '',
       collapsed: Boolean(node.collapsed),
@@ -264,4 +288,25 @@ export function normalizeDocument(doc: GraphDocument): { doc: GraphDocument; iss
   }
 
   return { doc: { ...doc, schemaVersion: SCHEMA_VERSION, nodes, edges, rootNodeId: rootId }, issues };
+}
+
+/** Keeps only well-formed chat turns; malformed entries are dropped, not rendered. */
+function sanitizeChat(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  const out: ChatMessage[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const candidate = entry as Partial<ChatMessage>;
+    if (typeof candidate.id !== 'string' || candidate.id.length === 0) continue;
+    if (typeof candidate.content !== 'string') continue;
+    if (candidate.role !== 'user' && candidate.role !== 'assistant') continue;
+    out.push({
+      id: candidate.id,
+      role: candidate.role,
+      content: candidate.content,
+      createdAt: typeof candidate.createdAt === 'number' ? candidate.createdAt : 0,
+      ...(candidate.interrupted ? { interrupted: true } : {}),
+    });
+  }
+  return out;
 }

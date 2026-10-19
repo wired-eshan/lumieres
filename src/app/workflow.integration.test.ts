@@ -3,7 +3,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { CanvasEngine } from '../canvas/engine';
 import { graphController } from '../graph/graphController';
 import { useGraphStore } from '../graph/graphStore';
-import { createEmptyDocument, getChildren, getNode } from '../graph/graphOperations';
+import {
+  appendChatMessage,
+  createEmptyDocument,
+  evaluateSourceReference,
+  getChildren,
+  getNode,
+  resizeNode,
+  setNodeKind,
+} from '../graph/graphOperations';
 import { isValidGraph, validateGraph } from '../graph/graphValidation';
 import { createAutosave } from '../persistence/autosave';
 import { createDocumentRepository, type RepositoryKind } from '../persistence/documentRepository';
@@ -261,5 +269,82 @@ describe('the branching workflow, end to end', () => {
     engine.fitToView();
 
     expect(getNode(engine.doc, rootId)?.position).toEqual(before);
+  });
+
+  it('branches from a selection inside an AI reply and keeps the message reference', () => {
+    const rootId = engine.doc.rootNodeId;
+    const ai = setNodeKind(engine.doc, rootId, 'ai');
+    if (!ai.ok) throw new Error(ai.message);
+    useGraphStore.getState().replaceDocument(ai.value.doc, { resetHistory: true });
+
+    const appended = appendChatMessage(
+      useGraphStore.getState().doc,
+      rootId,
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'Alpha beta gamma',
+        createdAt: 10,
+      },
+    );
+    if (!appended.ok) throw new Error(appended.message);
+    useGraphStore.getState().replaceDocument(appended.value.doc, { resetHistory: true });
+
+    const node = getNode(engine.doc, rootId);
+    if (!node) throw new Error('node missing');
+    engine.setBranchAction({
+      nodeId: rootId,
+      text: 'beta',
+      start: 6,
+      end: 10,
+      sourceMessageId: 'assistant-1',
+      anchor: { x: node.position.x + 120, y: node.position.y },
+    });
+
+    const childId = engine.createBranchFromSelection();
+    if (!childId) throw new Error('branch not created');
+    const child = getNode(engine.doc, childId);
+    expect(child?.sourceReference?.selectedTextSnapshot).toBe('beta');
+    expect(child?.sourceReference?.sourceMessageId).toBe('assistant-1');
+    if (!child) return;
+    expect(evaluateSourceReference(engine.doc, child).status).toBe('valid');
+  });
+
+  it('persists AI mode, resized dimensions and conversation across reload', async () => {
+    const rootId = engine.doc.rootNodeId;
+    let doc = useGraphStore.getState().doc;
+    const ai = setNodeKind(doc, rootId, 'ai');
+    if (!ai.ok) throw new Error(ai.message);
+    doc = ai.value.doc;
+    const chat = appendChatMessage(doc, rootId, {
+      id: 'm1',
+      role: 'user',
+      content: 'Remember this thought',
+      createdAt: 20,
+    });
+    if (!chat.ok) throw new Error(chat.message);
+    doc = chat.value.doc;
+    const resized = resizeNode(doc, rootId, { width: 540, height: 620 });
+    if (!resized.ok) throw new Error(resized.message);
+    useGraphStore.getState().replaceDocument(resized.value.doc, { resetHistory: true });
+
+    // Resize commits through the same engine path a corner drag uses.
+    engine.setDraftNodeSize(rootId, { width: 600, height: 640 });
+    engine.commitDraftNodeSize(rootId);
+    expect(getNode(engine.doc, rootId)?.size).toEqual({ width: 600, height: 640 });
+
+    const repository = await createDocumentRepository({ databaseName: 'lumieres_ai_workflow' });
+    const autosave = createAutosave({ controller: graphController, repository, debounceMs: 5 });
+    autosave.start();
+    await autosave.flush();
+    autosave.stop();
+
+    const loaded = await repository.load(engine.doc.id);
+    expect(loaded).not.toBeNull();
+    const restored = loaded ? getNode(loaded.doc, rootId) : null;
+    expect(restored?.kind).toBe('ai');
+    expect(restored?.size).toEqual({ width: 600, height: 640 });
+    expect(restored?.chat.map((message) => message.content)).toEqual(['Remember this thought']);
+    expect(validateGraph(loaded!.doc)).toEqual([]);
   });
 });

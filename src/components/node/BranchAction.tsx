@@ -72,8 +72,8 @@ export function BranchAction(): ReactNode {
         disabled={atLimit}
         title={
           atLimit
-            ? 'Branch limit reached — this note already has 50 branches'
-            : 'Create a new note branching from the selected text'
+            ? 'Branch limit reached — this window already has 50 branches'
+            : 'Create a new window branching from the selected text'
         }
       >
         <BranchIcon size={14} />

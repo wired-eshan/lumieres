@@ -20,7 +20,7 @@ export interface Hit {
 function rectFor(doc: GraphDocument, id: NodeId, drafts: ReadonlyMap<NodeId, Point>): Rect | null {
   const node = doc.nodes[id];
   if (!node) return null;
-  return nodeRectAt(drafts.get(id) ?? node.position, node.collapsed);
+  return nodeRectAt(drafts.get(id) ?? node.position, node.collapsed, node.size);
 }
 
 /** Topmost node under a world point, or null on empty canvas. */

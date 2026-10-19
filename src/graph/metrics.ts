@@ -6,8 +6,24 @@
  * pixel (the overlay is positioned with the very same camera transform).
  */
 
+import type { WindowKind, WindowSize } from './types';
+
 export const NODE_WIDTH = 340;
 export const NODE_HEIGHT = 268;
+
+/** A fresh AI window is a little larger: a conversation needs more room. */
+export const AI_NODE_WIDTH = 440;
+export const AI_NODE_HEIGHT = 440;
+
+/**
+ * Resize bounds. Minima keep the header, body and composer usable; maxima stop
+ * a single window from swallowing the workspace at 100% zoom.
+ */
+export const MIN_NODE_WIDTH = 260;
+export const MIN_NODE_HEIGHT = 240;
+export const MAX_NODE_WIDTH = 960;
+export const MAX_NODE_HEIGHT = 900;
+
 export const NODE_HEADER_HEIGHT = 46;
 export const NODE_FOOTER_HEIGHT = 30;
 export const NODE_CONTENT_PADDING = 14;
@@ -25,11 +41,47 @@ export const TITLE_FONT_SIZE = 14;
 export const TITLE_LINE_HEIGHT = 19;
 export const LABEL_FONT_SIZE = 11;
 
-/** World-space size of a node in its current collapsed state. */
-export function nodeSize(collapsed: boolean): { width: number; height: number } {
+/** Default size for a window's mode. Used when a node is created or migrated. */
+export function defaultNodeSize(kind: WindowKind): WindowSize {
+  return kind === 'ai'
+    ? { width: AI_NODE_WIDTH, height: AI_NODE_HEIGHT }
+    : { width: NODE_WIDTH, height: NODE_HEIGHT };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
+}
+
+/**
+ * Clamps a requested window size into the supported range.
+ *
+ * Dimensions are world units, so a resize survives zooming, panning and reload
+ * unchanged. Collapsed height is a presentation concern and is applied by
+ * `nodeSize`, never persisted over the user's chosen height.
+ */
+export function clampNodeSize(size: WindowSize): WindowSize {
+  const width = Number.isFinite(size.width) ? size.width : NODE_WIDTH;
+  const height = Number.isFinite(size.height) ? size.height : NODE_HEIGHT;
   return {
-    width: NODE_WIDTH,
-    height: collapsed ? COLLAPSED_HEIGHT : NODE_HEIGHT,
+    width: Math.round(clamp(width, MIN_NODE_WIDTH, MAX_NODE_WIDTH)),
+    height: Math.round(clamp(height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT)),
+  };
+}
+
+/**
+ * World-space size of a node in its current collapsed state.
+ *
+ * `size` is optional so tests and synthetic-graph builders that do not care
+ * about resizing keep the historical default.
+ */
+export function nodeSize(
+  collapsed: boolean,
+  size: WindowSize = defaultNodeSize('note'),
+): WindowSize {
+  const clamped = clampNodeSize(size);
+  return {
+    width: clamped.width,
+    height: collapsed ? COLLAPSED_HEIGHT : clamped.height,
   };
 }
 
@@ -53,18 +105,24 @@ export function bodyTopOffset(hasSourceChip: boolean): number {
 }
 
 /** Height available to the note body (excluding the chip and the footer). */
-export function bodyHeightFor(hasSourceChip: boolean): number {
-  return NODE_HEIGHT - NODE_FOOTER_HEIGHT - bodyTopOffset(hasSourceChip) - 6;
+export function bodyHeightFor(
+  hasSourceChip: boolean,
+  height: number = NODE_HEIGHT,
+): number {
+  return height - NODE_FOOTER_HEIGHT - bodyTopOffset(hasSourceChip) - 6;
 }
 
 /** Interior box available to the note body, in world units. */
-export function bodyBox(collapsed: boolean): { x: number; y: number; width: number; height: number } {
-  const size = nodeSize(collapsed);
+export function bodyBox(
+  collapsed: boolean,
+  size: WindowSize = defaultNodeSize('note'),
+): { x: number; y: number; width: number; height: number } {
+  const node = nodeSize(collapsed, size);
   return {
     x: NODE_CONTENT_PADDING,
     y: bodyTopOffset(true),
-    width: size.width - NODE_CONTENT_PADDING * 2,
-    height: size.height - NODE_FOOTER_HEIGHT - bodyTopOffset(true) - 6,
+    width: node.width - NODE_CONTENT_PADDING * 2,
+    height: node.height - NODE_FOOTER_HEIGHT - bodyTopOffset(true) - 6,
   };
 }
 

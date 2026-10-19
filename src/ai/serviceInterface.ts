@@ -1,10 +1,14 @@
 /**
- * The AI service boundary — a seam, not an implementation.
+ * The generic AI service boundary.
  *
- * Nothing in the app calls these methods today and no provider, key or network
- * code exists. The interface is defined so that adding AI later is a matter of
- * implementing it and registering it, with no change to the graph, editor or
- * canvas layers.
+ * Chat is implemented today in `chatRuntime.ts` + `chatService.ts` (an
+ * OpenAI-compatible provider, user-supplied key, streaming). This interface
+ * remains the seam for the other
+ * planned surfaces — autocomplete and one-shot Q&A — so they can be added
+ * without touching the graph, editor or canvas layers.
+ *
+ * Nothing registers a service here by default, and no UI affordance depends on
+ * one, so no unimplemented AI feature pretends to exist.
  *
  * Contract requirements captured here (see `sessionStore.ts` for the state half):
  *  - requests are addressed by (nodeId, requestId)

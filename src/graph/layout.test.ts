@@ -109,4 +109,16 @@ describe('branch placement', () => {
     expect(bounds?.width).toBe(500 + nodeSize(false).width);
     expect(bounds?.width).toBeGreaterThan(0);
   });
+
+  it('places the next branch past a resized parent', () => {
+    const doc = createEmptyDocument();
+    const parent = getNode(doc, doc.rootNodeId);
+    if (!parent) throw new Error('missing root');
+    const resized = { ...parent, size: { width: 620, height: 500 } };
+
+    const position = canonicalChildPosition(resized, 0);
+    expect(position.x).toBe(resized.position.x + 620 + 132);
+    // The child still starts to the right of the parent's real frame.
+    expect(position.x).toBeGreaterThan(resized.position.x + resized.size.width);
+  });
 });

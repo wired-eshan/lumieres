@@ -1,11 +1,11 @@
 /**
- * AI session types — architectural groundwork only.
+ * AI session types.
  *
- * **No AI is implemented, wired, or called.** These types exist so the graph,
- * editor and state layers already have the shape they need for per-node AI
- * sessions, and so nothing has to be rewritten when a provider is added.
+ * Chat conversations are implemented: `chatRuntime.ts` drives requests and
+ * `sessionStore.ts` holds their per-node runtime state. The types here also keep
+ * the shape needed for the not-yet-built autocomplete and one-shot Q&A surfaces.
  *
- * Key properties the types are designed to preserve:
+ * Key properties the types preserve:
  *  - sessions are keyed by node id, so every window owns an independent session
  *  - each request carries its own id, so a late response can be discarded
  *  - status, messages and cancellation are per node, never global

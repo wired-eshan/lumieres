@@ -38,15 +38,20 @@ export function NodeToolbar(): ReactNode {
 
   const childCount = Object.values(doc.nodes).filter((candidate) => candidate.parentId === node.id).length;
   const atLimit = childCount >= MAX_CHILDREN_PER_NODE;
-  const label = node.title.trim() || truncate(node.content.trim(), 32) || 'Untitled note';
+  const lastChat = node.chat[node.chat.length - 1]?.content ?? '';
+  const label =
+    node.title.trim() ||
+    truncate(node.content.trim(), 32) ||
+    (node.kind === 'ai' ? truncate(lastChat, 32) || 'AI conversation' : 'Untitled note');
+  const editLabel = node.kind === 'ai' ? 'Open this AI conversation' : 'Edit this note';
 
   return (
-    <div className="node-toolbar" data-overlay="true" ref={registerRef} role="toolbar" aria-label="Selected note actions">
+    <div className="node-toolbar" data-overlay="true" ref={registerRef} role="toolbar" aria-label="Selected window actions">
       <button
         type="button"
         className="node-toolbar__title"
         onClick={() => engine.startEditing(node.id)}
-        title="Edit this note"
+        title={editLabel}
       >
         {truncate(label, 28)}
       </button>
@@ -60,10 +65,10 @@ export function NodeToolbar(): ReactNode {
         disabled={atLimit}
         title={
           atLimit
-            ? `Branch limit reached — this note already has ${MAX_CHILDREN_PER_NODE} branches`
-            : 'Create a branch from this note'
+            ? `Branch limit reached — this window already has ${MAX_CHILDREN_PER_NODE} branches`
+            : 'Create a branch from this window'
         }
-        aria-label="Create a branch from this note"
+        aria-label="Create a branch from this window"
       >
         <BranchIcon />
         <span className="node-toolbar__badge">{childCount}</span>
@@ -73,8 +78,8 @@ export function NodeToolbar(): ReactNode {
         type="button"
         className="icon-button"
         onClick={() => engine.toggleCollapsed(node.id)}
-        title={node.collapsed ? 'Expand this note' : 'Collapse this note'}
-        aria-label={node.collapsed ? 'Expand this note' : 'Collapse this note'}
+        title={node.collapsed ? 'Expand this window' : 'Collapse this window'}
+        aria-label={node.collapsed ? 'Expand this window' : 'Collapse this window'}
       >
         {node.collapsed ? <ExpandIcon /> : <CollapseIcon />}
       </button>
@@ -83,8 +88,8 @@ export function NodeToolbar(): ReactNode {
         type="button"
         className="icon-button"
         onClick={() => engine.focusNode(node.id)}
-        title="Focus this note"
-        aria-label="Focus this note"
+        title="Focus this window"
+        aria-label="Focus this window"
       >
         <TargetIcon />
       </button>
@@ -122,8 +127,8 @@ export function NodeToolbar(): ReactNode {
         type="button"
         className="icon-button is-danger"
         onClick={() => engine.requestDelete([node.id])}
-        title="Delete this note and its branches"
-        aria-label="Delete this note and its branches"
+        title="Delete this window and its branches"
+        aria-label="Delete this window and its branches"
       >
         <TrashIcon />
       </button>

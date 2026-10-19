@@ -72,7 +72,7 @@ export function Minimap(): ReactNode {
       if (!node.parentId) continue;
       const parent = doc.nodes[node.parentId];
       if (!parent) continue;
-      const parentSize = nodeSize(parent.collapsed);
+      const parentSize = nodeSize(parent.collapsed, parent.size);
       const a = project(parent.position.x + parentSize.width / 2, parent.position.y + parentSize.height / 2);
       const b = project(node.position.x, node.position.y + 8);
       ctx.moveTo(a.x, a.y);
@@ -82,7 +82,7 @@ export function Minimap(): ReactNode {
 
     const selected = new Set(engine.getSelectedIds());
     for (const node of nodes) {
-      const size = nodeSize(node.collapsed);
+      const size = nodeSize(node.collapsed, node.size);
       const topLeft = project(node.position.x, node.position.y);
       const isRoot = node.id === doc.rootNodeId;
       ctx.fillStyle = selected.has(node.id)

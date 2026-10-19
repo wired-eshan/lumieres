@@ -64,7 +64,11 @@ export function GraphCanvas({ children, ...handlers }: GraphCanvasProps): ReactN
   }, [engine]);
 
   return (
-    <div className="canvas-root" ref={containerRef} data-pan-held="false">
+    <div
+      className="canvas-root"
+      ref={containerRef}
+      data-pan-held="false"
+    >
       <canvas className="canvas-surface" ref={canvasRef} aria-label="Graph canvas" role="img" />
 
       <div className="overlay-layer" ref={overlayRef}>
