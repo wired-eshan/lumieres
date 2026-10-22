@@ -175,7 +175,9 @@ export function useKeyboardShortcuts(
         handlers.onImportRequested?.();
         return;
       }
-      if (event.key === '?' || (mod && event.key === '/')) {
+      // Help requires the platform modifier so a bare "?" typed in a note or the
+      // chat composer is never swallowed by the global shortcut.
+      if (mod && event.shiftKey && (event.key === '?' || event.key === '/')) {
         event.preventDefault();
         handlers.onHelpRequested?.();
         return;

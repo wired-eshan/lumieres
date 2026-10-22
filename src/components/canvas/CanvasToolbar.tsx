@@ -179,7 +179,7 @@ export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarPro
           type="button"
           className="icon-button"
           onClick={onHelp}
-          title="Keyboard shortcuts and help (?)"
+          title="Keyboard shortcuts and help (⌘⇧? / Ctrl+Shift+?)"
           aria-label="Help"
         >
           <HelpIcon />

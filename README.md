@@ -89,7 +89,8 @@ comfortable holding on this device.
 | Delete | Delete selection, with a preview when it removes a subtree |
 | Arrow keys | Move to parent, child, or sibling window |
 | ⌘1 / ⌘2 / ⌘0 | Fit graph / fit selection / reset zoom |
-| ⌘S · ⌘E · ⌘O · ? | Save now · export · import · help |
+| ⌘S · ⌘E · ⌘O | Save now · export · import |
+| ⌘⇧? (Ctrl + Shift + ? on Windows) | Open the help panel |
 
 ---
 

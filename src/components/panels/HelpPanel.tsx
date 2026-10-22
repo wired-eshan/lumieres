@@ -26,6 +26,7 @@ const NOTE_SHORTCUTS: Array<[string, string]> = [
   ['Delete', 'Delete the selection (with preview)'],
   [`${MOD}S`, 'Save now'],
   [`${MOD}E / ${MOD}O`, 'Export / import a canvas'],
+  [`${MOD} + Shift + ?`, 'Open this help panel'],
 ];
 
 const AI_SHORTCUTS: Array<[string, string]> = [
