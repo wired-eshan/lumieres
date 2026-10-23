@@ -1,12 +1,13 @@
 /**
  * Reasoning-effort levels understood by OpenAI-compatible chat APIs.
  *
- * Provider `/models` responses are authoritative when they advertise
- * `reasoning_effort` support. Many servers (including OpenAI's own `/models`)
- * only return ids, so `inferReasoningEfforts` provides a conservative fallback
- * based on well-known families. The inference never claims support for an
- * unknown model; the effort control stays disabled unless the provider or a
- * known family says it is available.
+ * OpenRouter's public catalogue is the authoritative source for which levels a
+ * model accepts (`reasoning.supported_efforts`); `models.ts` parses it. For
+ * custom endpoints whose own `/models` response has no capability fields,
+ * `inferReasoningEfforts` provides a conservative fallback based on well-known
+ * families. The inference never claims support for an unknown model; the effort
+ * control stays disabled unless the catalogue or a known family says it is
+ * available.
  */
 
 export const REASONING_EFFORT_LEVELS = [

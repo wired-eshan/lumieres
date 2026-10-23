@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../../config';
 import { CloseIcon } from '../icons';
 
 const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -82,8 +83,9 @@ export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
         <div className="modal__body">
           <p className="help__lede">
             Every canvas starts with one root note. Select a phrase, create a branch, and keep going —
-            each window can spawn up to 50 of its own, and the graph keeps the lineage of every idea.
-            Any window can also switch to an AI conversation; each one keeps its own chat.
+            each window can spawn up to {MAX_CHILDREN_PER_NODE} of its own, and the graph keeps the
+            lineage of every idea. Any window can also switch to an AI conversation; each one keeps
+            its own chat.
           </p>
 
           <div className="help__grid">
@@ -132,19 +134,24 @@ export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
             <h3>Limits &amp; privacy</h3>
             <ul>
               <li>
-                <strong>20,000 characters</strong> per note and per chat message, counted in UTF-16
-                code units. Pasting past the limit trims the paste rather than the existing text.
+                <strong>{MAX_NODE_CONTENT_LENGTH.toLocaleString('en-US')} characters</strong> per
+                note and per user chat message, counted in UTF-16 code units. Pasting past the
+                limit trims the paste rather than the existing text.
               </li>
               <li>
-                <strong>50 branches</strong> per window, independently for notes and AI chats.
+                <strong>{MAX_CHILDREN_PER_NODE} branches</strong> per window, independently for
+                notes and AI chats.
               </li>
               <li>
                 Deleting a window removes its whole subtree, after a preview of exactly what goes.
               </li>
               <li>
-                Chat requests use <strong>your own API key</strong> with any OpenAI-compatible
-                provider. It is stored in this browser only and never included in canvas exports;
-                requests go directly to the provider whose base URL you configure.
+                Chat requests use <strong>your own API key</strong> with the provider selected in
+                Settings: OpenAI, OpenRouter, DeepSeek, Anthropic, or a custom endpoint. Keys are
+                stored per provider in this browser only and never included in canvas exports;
+                each key is sent only to its provider or the base URL you configure for it. Model
+                metadata comes from the provider&apos;s catalogue or documented tables; a custom
+                endpoint&apos;s effort support may be inferred and is labelled so in Settings.
               </li>
               <li>
                 Everything — notes, conversations, positions and sizes — is stored locally and

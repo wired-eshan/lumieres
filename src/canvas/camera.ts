@@ -6,7 +6,7 @@
  * component tree. Functions here return *new* cameras so they stay testable.
  */
 
-import { MAX_ZOOM, MIN_ZOOM } from '../graph/metrics';
+import { MAX_ZOOM, MIN_ZOOM } from '../config';
 import type { Point, Rect } from '../graph/types';
 import { clamp } from '../utils/misc';
 import { screenToWorld, visibleWorldRect } from './coordinateTransforms';

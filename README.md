@@ -5,8 +5,9 @@ canvas, select a phrase, and branch it into a connected child window. Repeat
 from any window to grow a tree of connected thinking.
 
 Every window can switch between a **note** and an **AI conversation** backed by
-the user's own OpenAI-compatible API key. Conversations, notes, window sizes and
-the graph itself are stored locally and restored on refresh.
+the user's own API key for OpenAI, OpenRouter, DeepSeek, Anthropic, or a custom
+endpoint. Conversations, notes, window sizes and the graph itself are stored
+locally and restored on refresh.
 
 Built to the specification in [`agents.md`](./agents.md).
 
@@ -21,23 +22,86 @@ npm run dev        # http://localhost:5173
 | `npm run build` | Typecheck, then production build into `dist/` |
 | `npm run preview` | Serve the production build |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
-| `npm test` | Vitest (275 tests) |
+| `npm test` | Vitest (419 tests) |
 
 Requires Node 20+. The app is fully client-side; there is no backend to run.
 
 ### AI setup
 
-Open the gear icon in the toolbar (or Settings from an empty chat window), paste
-an API key, and set the provider's OpenAI-compatible base URL (the default is
-`https://api.openai.com/v1`). Press **Load models** to read the provider's
-`GET /models` response into the model picker; when that response (or a known
-model family) advertises reasoning-effort support, choose a level for the
-selected model. Save to apply.
+Open the gear icon in the toolbar (or Settings from an empty chat window) and
+choose a provider. Each provider keeps its own key, endpoint, model and
+reasoning effort, so switching from OpenRouter to Anthropic never sends one
+provider's key to the other.
 
-The key is stored only in this browser's `localStorage`; it is never written
-into the canvas document, exported, or logged. Requests go directly from the
-browser to the provider whose base URL you configure. Use a key you are
-comfortable holding on this device.
+| Provider | Protocol | Default base URL | Effort levels sent |
+| --- | --- | --- | --- |
+| OpenAI | Responses | `https://api.openai.com/v1` | per model (documented table) |
+| OpenRouter | Responses (stateless) | `https://openrouter.ai/api/v1` | per model from its catalogue; four-level fallback |
+| DeepSeek | Responses (stateless) | `https://api.deepseek.com` | `none`/`low`/`high`/`max`, with documented aliases |
+| Anthropic | Messages | `https://api.anthropic.com` | `low`/`medium`/`high`/`xhigh`/`max` |
+| Custom | Responses, Messages or legacy Chat Completions | your URL | only when the model is recognised |
+
+The SDKs append the protocol path (`/responses`, `/v1/messages` or
+`/chat/completions`). A full endpoint pasted into the base-URL field is
+normalised so the path is not duplicated, and `/v1` is never added
+automatically.
+
+Model discovery is provider-aware:
+
+- **OpenRouter** loads its public `GET /api/v1/models` catalogue automatically
+  at the documented endpoint; the catalogue needs no key and its per-model
+  `reasoning.supported_efforts` is authoritative. If the profile overrides the
+  base URL for a gateway, that endpoint's own `/models` list is used with the
+  key instead, so discovery follows the configured URL. Without a loaded
+  catalogue, only the four levels the Responses reasoning guide documents
+  (`minimal`/`low`/`medium`/`high`) are inferred.
+- **OpenAI** and **DeepSeek** read their own authenticated `/models` endpoint
+  and apply the provider's documented effort table. A documented default model
+  is offered before any network call.
+- **Anthropic** reads the Models API, including each model's
+  `capabilities.effort`, with a documented fallback list when the catalogue is
+  unavailable.
+- **Custom** endpoints list their own models when supported; otherwise type the
+  model id. Effort is sent only when the id matches a documented family, and the
+  UI labels that inference as uncertain.
+
+An unsupported saved effort is never silently replaced. It stays visible in the
+selector with an explanation, and Save is blocked until you choose a supported
+level or Provider default.
+
+The keys are stored only in this browser's `localStorage`, one per provider.
+They are never written into the canvas document, exported, logged, or sent to
+another provider (including OpenRouter's public catalogue). Requests go directly
+from the browser to the provider whose base URL you configure. A browser-held
+key is readable by anyone with access to the browser profile; use a key you are
+comfortable holding on this device. Direct browser requests also depend on the
+provider allowing CORS, so a proxy may be necessary for a locked-down provider.
+Plain `http://` base URLs are accepted for local development, but the settings
+dialog warns that the key would then travel without transport encryption; use
+HTTPS for any remote endpoint.
+
+OpenAI Responses is stateful at its documented endpoint: this app sends
+`store: true` and may use `previous_response_id` to continue an append-only
+conversation. An OpenAI base-URL override is treated as a possible proxy and
+uses full history without `store`. OpenRouter and DeepSeek Responses are
+stateless (OpenRouter rejects `store`/`previous_response_id` with a 400), and
+Anthropic Messages is stateless, so those providers receive the full normalized
+history on every request. The continuation id is in-memory only, scoped to one
+window, provider and model, and is never exported or reused after a switch.
+
+### Configuration
+
+Every product/domain limit lives in [`src/config.ts`](./src/config.ts): children
+per window, note/chat character length, undo depth, window resize bounds, zoom
+and level-of-detail thresholds, chat output tokens, concurrent requests, the
+lineage/history character budgets, and the localStorage mirror cap.
+
+Provider metadata is deliberately separate: [`src/ai/provider.ts`](./src/ai/provider.ts)
+owns provider ids, labels, default endpoints/models, protocols, capabilities and
+base-URL normalisation. [`src/ai/effort.ts`](./src/ai/effort.ts) owns the
+documented per-model effort tables and alias mapping. Domain operations and UI
+copy read those values rather than carrying their own literals, so changing a
+limit or a provider is one edit.
 
 ---
 
@@ -60,13 +124,17 @@ comfortable holding on this device.
 - **Branch from a selection** — highlight text, choose *Create branch* (or
   ⌘/Ctrl + ↵). Works in note bodies and AI replies; a chat selection records the
   message id so staleness can be checked later. The child opens ready to type.
-- **AI chat** — streaming replies, a composer with Enter-to-send, Stop for one
-  window only, per-window retries, independent conversations, an explicit
-  no-key state, and specific error messages for auth, rate limits, refusals and
-  network failures. Request tokens never touch the document or autosave.
+- **AI chat** — OpenAI, OpenRouter, DeepSeek, Anthropic or a custom endpoint,
+  chosen with a provider selector and per-provider keys. Streaming replies, a
+  composer with Enter-to-send, Stop for one window only, per-window retries,
+  independent conversations, an explicit no-key state, and specific error
+  messages for auth, rate limits, refusals and network failures. Request tokens
+  never touch the document or autosave.
 - **Limits, enforced in the domain** — 50 direct children per window and 20,000
-  characters per note *and per chat message*, all validated in `graphOperations`
-  rather than only in the UI.
+  characters per note *and per user chat message*, all defined in `src/config.ts`
+  and validated in `graphOperations` rather than only in the UI. Assistant
+  replies are model output, bounded by the output-token cap, not by the
+  user-authoring limit.
 - **Undo/redo** across creation, deletion, text, movement, mode switches and
   resizes, with typing bursts coalesced into one step. Chat turns are conversation
   history rather than text edits and deliberately stay outside the undo stack.
@@ -98,11 +166,20 @@ comfortable holding on this device.
 
 ```
 src/
+  config.ts    every product/domain limit; no provider metadata
   graph/       document model, pure operations, validation, layout, history, store, metrics
   canvas/      engine, camera, renderer, spatial index, hit testing, interactions
   editor/      character-limit rules, textarea selection geometry, chat DOM selection
   persistence/ repository, IndexedDB, migrations, autosave, import/export
-  ai/          settings, model discovery, provider transport, request runtime, context
+  ai/
+    provider.ts       registry: ids, protocols, endpoints, defaults, capabilities, URL rules
+    effort.ts         documented per-model effort tables, aliases, capability resolution
+    adapters/         OpenAI Responses, Anthropic Messages, legacy Chat Completions
+    chatService.ts    protocol dispatcher and error boundary
+    chatRuntime.ts    per-window request lifecycle; continuation state
+    continuationStore.ts  in-memory provider response ids, invalidated on switch
+    settings.ts       per-provider keys/profiles in browser-local storage
+    models.ts         provider-aware model discovery and metadata
   components/  React: canvas host, window frame, note editor, AI chat, panels
   app/         shell, boot sequence, engine context, UI commands
 ```
@@ -223,11 +300,29 @@ Chat is deliberately split across two stores:
 - **Context is budgeted.** `buildNodeContext` clips the note body and nearest
   ancestors; `selectConversationHistory` keeps the newest turns under a separate
   character budget. Other windows' chats are never sent.
-- **Transport is behind a seam.** `chatService` is the only provider-aware
-  module and loads the OpenAI SDK lazily on first send. `ai/models.ts` reads the
-  configured provider's `/models` endpoint for the picker and its advertised
-  reasoning-effort levels. The API key lives in `ai/settings` (localStorage) and
-  never appears in the document or an export.
+- **Transport is behind a protocol seam.** `chatService` validates the resolved
+  configuration, maps effort once, and dispatches to
+  `ai/adapters/openaiResponses.ts`, `ai/adapters/anthropicMessages.ts` or the
+  legacy `ai/adapters/openaiChat.ts`. Provider metadata is read from the
+  registry; the adapters contain no `if (provider === …)` branches. The OpenAI
+  and Anthropic SDKs are loaded lazily on first send, so a canvas with no AI
+  activity does not pay for them.
+- **Effort is mapped centrally.** `ai/effort.ts` resolves the selected model's
+  documented levels, uses OpenRouter's per-model catalogue metadata (with the
+  four documented Responses levels as a no-catalogue fallback), and applies
+  DeepSeek's aliases (`minimal`→`low`, `medium`/`xhigh`→`high`) with a
+  user-visible note. An unsupported level is omitted, never silently replaced;
+  the Settings dialog blocks Save until the user resolves it.
+- **Continuation is provider-scoped and in memory.** `continuationStore.ts`
+  holds an OpenAI Responses id only when the history is the exact prior history
+  plus one user turn for the same provider and model. A provider/model switch,
+  trimmed history, stopped partial reply or import invalidates it and the next
+  request rebuilds the full history. OpenRouter, DeepSeek and Anthropic are
+  treated as stateless and always receive the full normalized history. Ids are
+  never persisted, exported, or sent to another provider.
+- **Keys are per provider.** `ai/settings.ts` keeps one profile per provider in
+  `localStorage`; resolving the active provider is the only place the key moves
+  into a request. Keys never appear in the graph document or an export.
 
 Selecting text in an AI reply uses DOM range offsets measured against that
 message's content. The resulting `SourceReference` carries the message id, so
@@ -327,20 +422,42 @@ semantics strange. The trade-off is that a hard refresh mid-response loses the
 partial text; the user's message is already saved, and a stopped response is
 kept and marked interrupted.
 
-**The API key is browser-local user configuration, not canvas data.** It is
-stored under a separate localStorage key, never serialised into the document,
-and sent only to the provider from the browser. This is the honest trade-off for
-a backend-free app: the key is readable by anyone with access to the browser
-profile, which the settings dialog states. Requests use the provider's
-browser-access header; the SDK is loaded lazily on first send so the initial
-canvas bundle stays lean.
+**Keys are browser-local per-provider profiles, not canvas data.** Each
+provider's key is stored under the same browser-local settings record but in a
+separate profile; resolving the *active* provider is the only path into a
+request. Keys are never serialised into the document, exported, logged, or sent
+to a different provider. This is the honest trade-off for a backend-free app:
+the key is readable by anyone with access to the browser profile, which the
+settings dialog states. `dangerouslyAllowBrowser` is required by both the OpenAI
+and Anthropic SDKs; it disables their browser guard, not CORS. Direct requests
+therefore work only where the provider permits browser origins.
 
-**Provider transport is isolated.** `ai/chatService.ts` is the only module that
-imports the OpenAI SDK. Any OpenAI-compatible base URL works; a provider with a
-different protocol or the planned autocomplete/Q&A surfaces can be added behind
-the same boundary without touching graph, canvas or editor code. Refusals, auth
-failures, rate limits and connection errors are mapped to specific user-facing
-messages.
+**Provider decisions live in a registry, not in the UI.** `ai/provider.ts`
+defines ids, labels, protocols, default endpoints/models, capability flags and
+base-URL normalisation. `ai/effort.ts` holds the documented per-model effort
+tables and aliases. The adapters are selected by `ApiProtocol`; adding a provider
+that speaks an existing protocol is a registry entry, and adding a new protocol
+is one adapter plus one registry protocol value. No chat component branches on a
+provider id.
+
+**Conversation continuity is deliberate and provider-specific.** OpenAI
+Responses supports `previous_response_id`; the runtime uses it only for a strict
+append-only history for the same provider and model, and the adapter sends
+`store: true` so the provider can retain the response. This is enabled only for
+the documented OpenAI base URL: a user-supplied OpenAI-compatible override may
+be a proxy, so it is treated as stateless. All other providers are treated as
+stateless: OpenRouter's Responses API rejects `store` and
+`previous_response_id` with a 400, DeepSeek documents a stateless API, and
+Anthropic Messages has no continuation parameter. Those paths always send the
+full normalized history. This keeps behaviour predictable and prevents a
+provider id from leaking across providers, at the cost of a larger request on
+the stateless providers (they are billed for prior input regardless).
+
+**Error messages are specific and redacted.** `ai/errors.ts` distinguishes
+authentication, permission, model/endpoint, rate limit, invalid effort, server
+and connection failures. Every message passes through `redactSecrets`, and the
+dispatcher re-checks adapter-thrown `AIRequestError`s, so an SDK or provider
+message cannot echo the key or an authorization header into the UI.
 
 **The document is an immutable `Record<NodeId, NoteNode>`.** Every operation
 copies the node map. That is O(n) per edit — measured at ~0.7 ms with 5,000
@@ -354,7 +471,7 @@ current model; a persistent map would remove it if it ever matters.
 
 ## Testing and measured performance
 
-275 tests across domain, canvas, editor, persistence, AI, settings and
+419 tests across domain, canvas, editor, persistence, AI, settings and
 integration layers:
 
 ```
@@ -381,13 +498,28 @@ chat selection    UTF-16 offsets within a reply, cross-message rejection
 persistence       IndexedDB round trips, emergency mirror recovery, migrations,
                   debounced autosave, status transitions, write serialisation,
                   failure surfacing, restoration, AI mode/size/chat round trip
-ai settings       local persistence, key clearing, malformed storage, legacy migration,
-                  full model list in the select, effort levels for reasoning models
-ai models         /models parsing, effort metadata, family inference, deduplication
-ai transport      provider error-to-message mapping
+ai settings       per-provider key isolation, key clearing, malformed storage,
+                  legacy migration (OpenRouter, bare Claude, custom chat),
+                  provider resolution, exact per-model effort metadata
+ai providers      registry endpoints/protocols/capabilities, base-URL normalisation
+                  without duplicate /responses or /v1/messages segments,
+                  custom protocol resolution, configuration validation
+ai effort         OpenAI per-model tables, DeepSeek aliases, Anthropic levels
+                  (including max-without-xhigh on 4.6), OpenRouter per-model
+                  catalogue metadata with a four-level fallback, stored
+                  metadata, unsupported-level handling
+ai adapters       OpenAI Responses (stream, completed/failed/incomplete/error,
+                  refusal, generate, redaction), Anthropic Messages (stream,
+                  final message, refusal, max_tokens, generate), legacy chat
+                  (deltas, content filter, token parameter choice)
+ai models         OpenRouter catalogue parsing, Anthropic Models API capability
+                  parsing, provider-aware seeds and metadata, deduplication
+ai transport      protocol routing, continuation gating, effort pass-through,
+                  error-to-message mapping and secret redaction
 ai runtime        per-node isolation, concurrent streaming, superseded-response
                   rejection, scoped cancel, partial-response retention, retry,
-                  concurrency cap, no-key and note-mode guards
+                  concurrency cap, no-key/invalid-config guards, continuation
+                  reuse and invalidation across provider/model changes
 ai context        history budgeting, ancestor clipping, other-window exclusion
 integration       the full note workflow (type → highlight → branch → edit →
                   grandchild → move → reload → verify), plus AI branching and
@@ -431,11 +563,16 @@ __lumieresStress(5000)
 
 AI chat is implemented. What is deliberately still future-facing:
 
-- **Provider** — the implemented transport speaks OpenAI's Chat Completions
-  protocol, so any OpenAI-compatible service works through the base-URL setting.
-  A provider that requires a different request shape would be added behind
-  `ai/chatService.ts`; graph, canvas, editor and persistence stay
-  provider-agnostic.
+- **Providers** — OpenAI, OpenRouter and DeepSeek use the OpenAI Responses API;
+  Anthropic uses the native Messages API and is deliberately **not** routed
+  through an OpenAI-compatible endpoint. A custom endpoint must choose a
+  protocol explicitly (Responses, Messages, or legacy Chat Completions). The
+  graph, canvas, editor and persistence layers remain provider-agnostic; adding
+  a provider that speaks an existing protocol is a registry entry, and adding a
+  protocol is one adapter.
+- **Live provider calls are not part of the automated suite.** Adapter
+  behaviour is tested against mocked SDKs; the real browser→provider round trip
+  requires a user's key and network, and was not run in this environment.
 - **Autocomplete and non-chat Q&A** — not implemented and not faked.
   `ai/serviceInterface.ts` keeps the documented `AIService` boundary for them,
   and `ai/context.ts` keeps the selective, budgeted context assembly they need.
@@ -446,11 +583,15 @@ AI chat is implemented. What is deliberately still future-facing:
   snapshot (with staleness), clipped nearest ancestors and its own recent turns.
   No other window's conversation is ever included.
 
-`dangerouslyAllowBrowser` is required for a backend-free app; direct browser
-requests also depend on the provider allowing CORS. The key is treated accordingly: browser-local,
-user-managed and explicitly warned about. If the app later gains a backend, the
-same `chatService` boundary can move the request server-side without changing
-the document, UI or runtime.
+`dangerouslyAllowBrowser` is required by both the OpenAI and Anthropic SDKs for
+this backend-free app; it disables the SDK's browser guard but cannot make a
+provider accept a browser origin. Direct requests therefore depend on the
+provider's CORS policy (OpenAI, DeepSeek and OpenRouter were probed for
+preflight behaviour; success-path CORS on streaming endpoints is not documented
+and was not verified with a live key). The keys are treated accordingly:
+browser-local, per-provider, user-managed and explicitly warned about. If the
+app later gains a backend, the adapters and `chatService` boundary can move the
+requests server-side without changing the document, UI or runtime.
 
 ---
 
@@ -479,10 +620,42 @@ the document, UI or runtime.
   under a character budget, but the full history stays in the document (and in
   exports) until the window is deleted.
 - **Live provider calls are not exercised by the test suite.** Runtime isolation,
-  streaming plumbing, cancellation, context assembly and settings are unit
-  tested with injected transports; a real request requires the user's key and a
-  network. Error mapping and `/models` parsing are explicit, but the live
-  browser→provider round trip was not run in this environment.
+  streaming plumbing, cancellation, context assembly, provider routing and
+  adapter request/stream shapes are unit tested with mocked SDKs; a real request
+  requires the user's key and a network. The live browser→OpenAI/OpenRouter/
+  DeepSeek/Anthropic round trip was not run in this environment.
+- **Direct browser access depends on provider CORS.** `dangerouslyAllowBrowser`
+  only disables the SDK guard. Preflight probes for OpenAI, DeepSeek and
+  OpenRouter suggest browser calls are possible, but success-path streaming CORS
+  is not documented and error bodies may be unreadable when a provider omits
+  CORS headers. A proxy is the reliable fallback; the adapter boundary is ready
+  for one.
+- **OpenAI continuation stores responses at the provider.** At the documented
+  OpenAI endpoint, `previous_response_id` requires `store: true`, and OpenAI
+  retains the response (30 days by default, subject to the account's data
+  policy). OpenRouter, DeepSeek, Anthropic, and any OpenAI base-URL override
+  receive the full history each turn. Users who need stateless requests to the
+  official OpenAI endpoint would need a future "disable continuation" setting.
+- **OpenRouter's Responses API is stateless.** `store:true` and
+  `previous_response_id` are rejected with a 400, so the app never sends them
+  and always resends the full history. Its prose streaming docs name
+  `response.content_part.delta`/`response.done` while its OpenAPI schema and the
+  OpenAI SDK use `response.output_text.delta`/`response.completed`; the adapter
+  accepts both. Assistant history is replayed as output items with synthetic
+  `id`/`status`, as OpenRouter requires, rather than plain text turns.
+- **Model ids and effort tables are snapshots.** Provider model lists change;
+  the code uses documented defaults per provider, unknown ids get no effort
+  control, and a 400 from a provider is surfaced with a settings hint. A custom
+  endpoint's effort support is inferred from its model id and labelled as
+  uncertain in Settings.
+- **Reasoning traces are not persisted.** The document stores assistant text,
+  not provider reasoning items or Anthropic thinking blocks. Full-history
+  requests therefore replay the visible answer only. OpenAI's append-only
+  continuation keeps the provider-side response for its next turn, but a
+  provider switch or history rebuild starts from the normalized text history.
+- **AI settings across tabs are last-write-wins.** A storage listener refreshes
+  the runtime when another tab changes a key or profile, but an open Settings
+  draft that is saved later can restore its older values over that change.
 - **A refresh during a stream loses the partial reply.** The user's turn is
   already persisted; a stopped reply (Stop button) is kept and marked
   interrupted.

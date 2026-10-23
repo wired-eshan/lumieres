@@ -6,7 +6,31 @@
  * pixel (the overlay is positioned with the very same camera transform).
  */
 
+import {
+  MAX_NODE_HEIGHT,
+  MAX_NODE_WIDTH,
+  MAX_ZOOM,
+  MIN_EDIT_ZOOM,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  MIN_ZOOM,
+  TEXT_LOD_ZOOM,
+} from '../config';
 import type { WindowKind, WindowSize } from './types';
+
+// Re-exported here because callers of this geometry module historically read
+// the bounds alongside the drawing constants. The values themselves are owned
+// by `src/config.ts`.
+export {
+  MAX_NODE_HEIGHT,
+  MAX_NODE_WIDTH,
+  MAX_ZOOM,
+  MIN_EDIT_ZOOM,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+  MIN_ZOOM,
+  TEXT_LOD_ZOOM,
+};
 
 export const NODE_WIDTH = 340;
 export const NODE_HEIGHT = 268;
@@ -15,15 +39,9 @@ export const NODE_HEIGHT = 268;
 export const AI_NODE_WIDTH = 440;
 export const AI_NODE_HEIGHT = 440;
 
-/**
- * Resize bounds. Minima keep the header, body and composer usable; maxima stop
- * a single window from swallowing the workspace at 100% zoom.
- */
-export const MIN_NODE_WIDTH = 260;
-export const MIN_NODE_HEIGHT = 240;
-export const MAX_NODE_WIDTH = 960;
-export const MAX_NODE_HEIGHT = 900;
-
+// Resize bounds live in `src/config.ts` and are re-exported above. Minima keep
+// the header, body and composer usable; maxima stop a single window from
+// swallowing the workspace at 100% zoom.
 export const NODE_HEADER_HEIGHT = 46;
 export const NODE_FOOTER_HEIGHT = 30;
 export const NODE_CONTENT_PADDING = 14;
@@ -129,10 +147,6 @@ export function bodyBox(
 /** Grid spacing for the canvas background, in world units. */
 export const GRID_SIZE = 28;
 
-/** Camera limits. Below MIN_ZOOM the canvas switches to a simplified rendering mode. */
-export const MIN_ZOOM = 0.1;
-export const MAX_ZOOM = 3;
-/** Zoom level at which canvas text stops being drawn in favour of block placeholders. */
-export const TEXT_LOD_ZOOM = 0.42;
-/** Below this zoom the HTML editor overlay is closed to avoid unreadable editing. */
-export const MIN_EDIT_ZOOM = 0.5;
+// Camera limits are owned by `src/config.ts` and re-exported above. Below
+// MIN_ZOOM the canvas switches to a simplified rendering mode; below
+// MIN_EDIT_ZOOM the HTML editor overlay is closed to avoid unreadable editing.

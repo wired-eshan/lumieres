@@ -3,8 +3,11 @@
  *
  * These mirror the CSS custom properties in `styles/index.css`; keeping them in
  * one object means the HTML overlay (editor, toolbars) and the canvas paint the
- * same design tokens.
+ * same design tokens. Zoom-tier thresholds are load-bearing limits, so their
+ * values are owned by `src/config.ts`.
  */
+
+import { DETAIL_LOD_ZOOM, STRUCTURE_LOD_ZOOM, TEXT_LOD_ZOOM } from '../config';
 
 export const palette = {
   background: '#0a0c11',
@@ -44,9 +47,9 @@ export const fonts = {
 
 export const zoomTier = {
   /** Below this, text is replaced by placeholder blocks. */
-  text: 0.42,
+  text: TEXT_LOD_ZOOM,
   /** Below this, node shadows and inner detail are skipped. */
-  detail: 0.25,
+  detail: DETAIL_LOD_ZOOM,
   /** Below this, only edges and outlines are painted. */
-  structure: 0.14,
+  structure: STRUCTURE_LOD_ZOOM,
 } as const;

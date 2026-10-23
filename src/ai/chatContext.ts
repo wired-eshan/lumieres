@@ -10,13 +10,14 @@
  * crowd out the branch lineage either, because the two are assembled separately.
  */
 
+import { AI_HISTORY_BUDGET } from '../config';
 import { buildNodeContext } from './context';
 import type { ChatMessage, GraphDocument, NodeId } from '../graph/types';
 
-/** Characters of conversation history sent with a request. */
-export const DEFAULT_HISTORY_CHARACTERS = 24_000;
-/** Most turns considered, regardless of size. */
-export const MAX_HISTORY_MESSAGES = 80;
+/** Characters of conversation history sent with a request (owned by config). */
+export const DEFAULT_HISTORY_CHARACTERS = AI_HISTORY_BUDGET.maxCharacters;
+/** Most turns considered, regardless of size (owned by config). */
+export const MAX_HISTORY_MESSAGES = AI_HISTORY_BUDGET.maxMessages;
 
 export interface ChatTurn {
   role: 'user' | 'assistant';

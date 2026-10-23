@@ -18,8 +18,9 @@ export type EdgeId = string;
 /** Bumped whenever the on-disk shape changes; see `persistence/migrations.ts`. */
 export const SCHEMA_VERSION = 2;
 
-/** Maximum direct children a single node may have. Applies per node, not per canvas. */
-export const MAX_CHILDREN_PER_NODE = 50;
+// Product limits live in `src/config.ts`; these re-exports keep the document
+// types as the import path for code that treats the limits as schema rules.
+export { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../config';
 
 /**
  * A window can show either a plain note or a chat with an LLM. Both modes share
@@ -48,13 +49,6 @@ export interface ChatMessage {
   /** True when the user stopped the response before it finished. */
   interrupted?: boolean;
 }
-
-/**
- * Maximum characters in a single note body.
- * Counted in UTF-16 code units (`String.prototype.length`) so that offsets,
- * textarea selections and this limit all share one convention.
- */
-export const MAX_NODE_CONTENT_LENGTH = 20_000;
 
 export interface GraphDocument {
   schemaVersion: number;

@@ -10,7 +10,7 @@
 import { useCallback, type ReactNode } from 'react';
 import { useEngine, useEngineSnapshot } from '../../app/EngineContext';
 import { useGraphStore } from '../../graph/graphStore';
-import { MAX_CHILDREN_PER_NODE } from '../../graph/types';
+import { MAX_CHILDREN_PER_NODE } from '../../config';
 import { truncate } from '../../utils/misc';
 import { BranchIcon, CollapseIcon, ExpandIcon, FitIcon, ParentIcon, TargetIcon, TrashIcon } from '../icons';
 

@@ -15,7 +15,13 @@ import {
   type ChatRuntimeDeps,
 } from './chatRuntime';
 import type { StreamChatInput, StreamChatResult } from './chatService';
-import type { AISettings } from './settings';
+import { mapEffortForRequest } from './effort';
+import { PROVIDERS } from './provider';
+import {
+  createDefaultAISettings,
+  makeProviderProfile,
+  type AISettings,
+} from './settings';
 
 interface Harness {
   runtime: ChatRuntime;
@@ -24,7 +30,7 @@ interface Harness {
   requests: StreamChatInput[];
   addNode(kind: WindowKind): string;
   setKind(nodeId: string, kind: WindowKind): void;
-  resolve(index: number, result?: StreamChatResult): void;
+  resolve(index: number, result?: Partial<StreamChatResult>): void;
   reject(index: number, message: string): void;
   settings: AISettings;
 }
@@ -51,13 +57,20 @@ function createHarness(options: { apiKey?: string } = {}): Harness {
     reject: (error: unknown) => void;
   }> = [];
 
+
   let counter = 0;
-  const settings: AISettings = {
+  const settings: AISettings = createDefaultAISettings();
+  settings.providerId = 'openrouter';
+  settings.profiles.openrouter = makeProviderProfile('openrouter', {
     apiKey: options.apiKey ?? 'sk-test',
-    baseUrl: 'https://api.openai.com/v1',
-    model: 'gpt-4o-mini',
-    reasoningEffort: '',
-  };
+    model: PROVIDERS.openrouter.defaultModel,
+  });
+  const emptyEffort = mapEffortForRequest({
+    providerId: 'openrouter',
+    protocol: 'openai-responses',
+    modelId: PROVIDERS.openrouter.defaultModel,
+    requested: '',
+  });
 
   const deps: ChatRuntimeDeps = {
     controller: {
@@ -110,8 +123,17 @@ function createHarness(options: { apiKey?: string } = {}): Harness {
       const result = setNodeKind(doc, nodeId, kind);
       if (result.ok) doc = result.value.doc;
     },
-    resolve: (index, result = { text: `answer ${index}`, stopReason: 'end_turn' }) => {
-      pending[index]?.resolve(result);
+    resolve: (
+      index,
+      result: Partial<StreamChatResult> = {},
+    ) => {
+      pending[index]?.resolve({
+        text: `answer ${index}`,
+        stopReason: 'end_turn',
+        responseId: null,
+        effort: emptyEffort,
+        ...result,
+      });
     },
     reject: (index, message) => {
       const error = new Error(message);
@@ -250,16 +272,20 @@ describe('AI chat runtime', () => {
     ]);
   });
 
-  it('passes the configured endpoint, model and effort to the transport', () => {
+  it('passes the resolved provider, endpoint, model and effort to the transport', () => {
     const harness = createHarness();
-    harness.settings.baseUrl = 'https://openrouter.ai/api/v1';
-    harness.settings.model = 'openai/gpt-5';
-    harness.settings.reasoningEffort = 'high';
+    harness.settings.profiles.openrouter = makeProviderProfile('openrouter', {
+      apiKey: 'sk-test',
+      model: 'openai/gpt-5',
+      reasoningEffort: 'high',
+    });
     const root = harness.doc().rootNodeId;
 
     expect(harness.runtime.send(root, 'hello').ok).toBe(true);
-    expect(harness.requests[0]).toMatchObject({
-      baseUrl: 'https://openrouter.ai/api/v1',
+    expect(harness.requests[0]?.config).toMatchObject({
+      providerId: 'openrouter',
+      protocol: 'openai-responses',
+      baseUrl: PROVIDERS.openrouter.defaultBaseUrl,
       model: 'openai/gpt-5',
       reasoningEffort: 'high',
     });
@@ -300,5 +326,174 @@ describe('AI chat runtime', () => {
     const outcome = harness.runtime.send(noteId, 'hello');
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NOT_AI_WINDOW');
+  });
+
+  it('reports an invalid custom-provider configuration instead of sending', () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'custom';
+    harness.settings.customProtocol = 'openai-responses';
+    harness.settings.profiles.custom = makeProviderProfile('custom', {
+      apiKey: 'sk-test',
+      baseUrl: '',
+      model: 'my-model',
+    });
+    const root = harness.doc().rootNodeId;
+
+    const outcome = harness.runtime.send(root, 'hello');
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.code).toBe('INVALID_CONFIG');
+    expect(harness.requests).toHaveLength(0);
+  });
+
+  it('uses an OpenAI continuation id only for an append-only history on the same provider and model', async () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'openai';
+    harness.settings.profiles.openai = makeProviderProfile('openai', {
+      apiKey: 'sk-test',
+      model: 'gpt-5.2',
+    });
+    const root = harness.doc().rootNodeId;
+
+    harness.runtime.send(root, 'first');
+    expect(harness.requests[0]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[0]?.messages.map((turn) => turn.content)).toEqual(['first']);
+    harness.resolve(0, { text: 'first answer', responseId: 'resp_1' });
+    await settle();
+
+    harness.runtime.send(root, 'second');
+    expect(harness.requests[1]?.previousResponseId).toBe('resp_1');
+    // Only the new turn is sent; the provider already has the first exchange.
+    expect(harness.requests[1]?.messages.map((turn) => turn.content)).toEqual(['second']);
+    harness.resolve(1, { text: 'second answer', responseId: 'resp_2' });
+    await settle();
+
+    // A model change invalidates the continuation; the full history is rebuilt.
+    harness.settings.profiles.openai = makeProviderProfile('openai', {
+      apiKey: 'sk-test',
+      model: 'gpt-5',
+    });
+    harness.runtime.send(root, 'third');
+    expect(harness.requests[2]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[2]?.messages.map((turn) => turn.content)).toEqual([
+      'first',
+      'first answer',
+      'second',
+      'second answer',
+      'third',
+    ]);
+  });
+
+  it('never sends a continuation id across a provider switch', async () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'openai';
+    harness.settings.profiles.openai = makeProviderProfile('openai', {
+      apiKey: 'sk-test',
+      model: 'gpt-5.2',
+    });
+    const root = harness.doc().rootNodeId;
+
+    harness.runtime.send(root, 'one');
+    harness.resolve(0, { text: 'one answer', responseId: 'resp_openai' });
+    await settle();
+
+    harness.settings.providerId = 'anthropic';
+    harness.settings.profiles.anthropic = makeProviderProfile('anthropic', {
+      apiKey: 'sk-ant',
+      model: 'claude-opus-5-5',
+    });
+    harness.runtime.send(root, 'two');
+    expect(harness.requests[1]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[1]?.config.protocol).toBe('anthropic-messages');
+    expect(harness.requests[1]?.messages.map((turn) => turn.content)).toEqual([
+      'one',
+      'one answer',
+      'two',
+    ]);
+  });
+
+  it('invalidates a rejected continuation so Retry rebuilds the full history', async () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'openai';
+    harness.settings.profiles.openai = makeProviderProfile('openai', {
+      apiKey: 'sk-test',
+      model: 'gpt-5.2',
+    });
+    const root = harness.doc().rootNodeId;
+
+    harness.runtime.send(root, 'one');
+    harness.resolve(0, { text: 'one answer', responseId: 'resp_1' });
+    await settle();
+
+    harness.runtime.send(root, 'two');
+    expect(harness.requests[1]?.previousResponseId).toBe('resp_1');
+    harness.reject(1, 'previous_response_not_found');
+    await settle();
+    expect(harness.sessions.getSession(root).status).toBe('error');
+
+    const retry = harness.runtime.retry(root);
+    expect(retry.ok).toBe(true);
+    expect(harness.requests[2]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[2]?.messages.map((turn) => turn.content)).toEqual([
+      'one',
+      'one answer',
+      'two',
+    ]);
+  });
+
+  it('clears a continuation when Stop persists a partial reply', async () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'openai';
+    harness.settings.profiles.openai = makeProviderProfile('openai', {
+      apiKey: 'sk-test',
+      model: 'gpt-5.2',
+    });
+    const root = harness.doc().rootNodeId;
+
+    harness.runtime.send(root, 'one');
+    harness.resolve(0, { text: 'one answer', responseId: 'resp_1' });
+    await settle();
+
+    harness.runtime.send(root, 'two');
+    harness.requests[1]?.onText('partial', 'partial');
+    harness.runtime.cancel(root);
+    await settle();
+
+    expect(lastChat(harness, root).at(-1)).toMatchObject({
+      role: 'assistant',
+      content: 'partial',
+      interrupted: true,
+    });
+
+    const retry = harness.runtime.retry(root);
+    expect(retry.ok).toBe(true);
+    expect(harness.requests[2]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[2]?.messages.map((turn) => turn.content)).toEqual([
+      'one',
+      'one answer',
+      'two',
+    ]);
+  });
+
+  it('ignores continuation ids for stateless providers such as DeepSeek', async () => {
+    const harness = createHarness();
+    harness.settings.providerId = 'deepseek';
+    harness.settings.profiles.deepseek = makeProviderProfile('deepseek', {
+      apiKey: 'sk-test',
+      model: 'deepseek-flash',
+    });
+    const root = harness.doc().rootNodeId;
+
+    harness.runtime.send(root, 'one');
+    // Even if a provider returns an id, a capability that says stateless wins.
+    harness.resolve(0, { text: 'one answer', responseId: 'resp_unused' });
+    await settle();
+
+    harness.runtime.send(root, 'two');
+    expect(harness.requests[1]?.previousResponseId).toBeUndefined();
+    expect(harness.requests[1]?.messages.map((turn) => turn.content)).toEqual([
+      'one',
+      'one answer',
+      'two',
+    ]);
   });
 });

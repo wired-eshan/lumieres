@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useController, useEngine } from '../../app/EngineContext';
+import { MAX_CHILDREN_PER_NODE } from '../../config';
 import { useGraphStore } from '../../graph/graphStore';
 import { computeStats, type ValidationIssue } from '../../graph/graphValidation';
 import { downloadDocument, importFromFile } from '../../persistence/importExport';
@@ -95,7 +96,7 @@ export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarPro
         />
         <span className="toolbar__stats" title="Notes · branches per node · depth">
           {formatCount(stats.nodeCount)} {stats.nodeCount === 1 ? 'window' : 'windows'} · max{' '}
-          {stats.maxChildren}/50 branches · depth {stats.maxDepth}
+          {stats.maxChildren}/{MAX_CHILDREN_PER_NODE} branches · depth {stats.maxDepth}
         </span>
       </div>
 

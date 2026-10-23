@@ -12,7 +12,7 @@
  * `graphValidation.validateGraph`, which reports over-limit notes on load.
  */
 
-import { MAX_NODE_CONTENT_LENGTH } from '../graph/types';
+import { MAX_NODE_CONTENT_LENGTH } from '../config';
 
 export const CHARACTER_LIMIT = MAX_NODE_CONTENT_LENGTH;
 

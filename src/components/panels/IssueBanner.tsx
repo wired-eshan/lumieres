@@ -8,7 +8,7 @@
 
 import { type ReactNode } from 'react';
 import type { ValidationIssue } from '../../graph/graphValidation';
-import { MAX_NODE_CONTENT_LENGTH } from '../../graph/types';
+import { MAX_NODE_CONTENT_LENGTH } from '../../config';
 import { formatCount } from '../../utils/misc';
 import { CloseIcon } from '../icons';
 

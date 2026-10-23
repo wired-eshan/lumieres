@@ -7,11 +7,10 @@
  * `OperationResult` so callers cannot forget to handle failure.
  */
 
+import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../config';
 import { createDocumentId, createEdgeId, createNodeId } from '../utils/id';
 import { clampNodeSize, defaultNodeSize, nodeSize } from './metrics';
 import {
-  MAX_CHILDREN_PER_NODE,
-  MAX_NODE_CONTENT_LENGTH,
   SCHEMA_VERSION,
   err,
   ok,
@@ -515,7 +514,7 @@ export function appendChatMessage(
   if (message.role === 'user' && message.content.length > MAX_NODE_CONTENT_LENGTH) {
     return err(
       'CONTENT_LIMIT_EXCEEDED',
-      `A chat message can hold at most ${MAX_NODE_CONTENT_LENGTH.toLocaleString('en-US')} characters.`,
+      `A user chat message can hold at most ${MAX_NODE_CONTENT_LENGTH.toLocaleString('en-US')} characters.`,
     );
   }
   if (node.chat.some((existing) => existing.id === message.id)) {

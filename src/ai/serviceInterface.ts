@@ -1,11 +1,10 @@
 /**
  * The generic AI service boundary.
  *
- * Chat is implemented today in `chatRuntime.ts` + `chatService.ts` (an
- * OpenAI-compatible provider, user-supplied key, streaming). This interface
- * remains the seam for the other
- * planned surfaces — autocomplete and one-shot Q&A — so they can be added
- * without touching the graph, editor or canvas layers.
+ * Chat is implemented today in `chatRuntime.ts` + `chatService.ts` (provider
+ * adapters, user-supplied key, streaming). This interface remains the seam for
+ * the other planned surfaces — autocomplete and one-shot Q&A — so they can be
+ * added without touching the graph, editor or canvas layers.
  *
  * Nothing registers a service here by default, and no UI affordance depends on
  * one, so no unimplemented AI feature pretends to exist.
@@ -18,7 +17,9 @@
  *  - concurrency limits, retries and backpressure belong to the implementation
  */
 
+import { CONFIG } from '../config';
 import type { AIStreamEvent, AIRequestId, AskInput, AskResult, AutocompleteInput } from './types';
+import type { ProviderId } from './provider';
 import type { NodeId } from '../graph/types';
 
 export interface AIService {
@@ -40,13 +41,13 @@ export interface AIServiceConfig {
   /** Maximum requests a single node may have in flight. */
   maxConcurrentPerNode: number;
   /** Provider identifier; resolved by the implementation, not by the UI. */
-  provider: string;
+  provider: ProviderId | 'unconfigured';
   model: string;
 }
 
 export const DEFAULT_AI_CONFIG: AIServiceConfig = {
-  maxConcurrentRequests: 4,
-  maxConcurrentPerNode: 1,
+  maxConcurrentRequests: CONFIG.ai.maxConcurrentRequests,
+  maxConcurrentPerNode: CONFIG.ai.maxConcurrentRequestsPerNode,
   provider: 'unconfigured',
   model: 'unconfigured',
 };

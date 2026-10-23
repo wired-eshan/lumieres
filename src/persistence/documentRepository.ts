@@ -15,6 +15,7 @@
  *   memory     last-resort store so the app still runs if both are blocked.
  */
 
+import { MIRROR_MAX_BYTES } from '../config';
 import type { GraphDocument } from '../graph/types';
 import { indexedDbAvailable, openKeyValueStore, type KeyValueStore } from './indexedDb';
 import { deserializeDocument, serializeDocument } from './migrations';
@@ -47,8 +48,6 @@ const DB_NAME = 'lumieres';
 const STORE_NAME = 'documents';
 const MIRROR_KEY = 'lumieres:mirror';
 const LAST_OPENED_KEY = 'lumieres:lastOpened';
-/** Above this size the emergency mirror is skipped to stay inside localStorage quota. */
-const MIRROR_MAX_BYTES = 900_000;
 
 /**
  * Returns a usable `localStorage`, or null.

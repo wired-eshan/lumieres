@@ -30,6 +30,9 @@ import { CHARACTER_LIMIT, applyTextEdit, limitMessage, limitStatus } from '../..
 import { readChatSelection } from '../../editor/chatSelection';
 import { aiSessionStore } from '../../ai/sessionStore';
 import { chatRuntime } from '../../ai/chatRuntime';
+import { mapEffortForRequest } from '../../ai/effort';
+import { getProviderDefinition } from '../../ai/provider';
+import { isAIConfigured, resolveAISettings } from '../../ai/settings';
 import { useAISettings } from '../../hooks/useAISettings';
 import { formatCount } from '../../utils/misc';
 import { ChatIcon, SendIcon, SettingsIcon, StopIcon } from '../icons';
@@ -76,7 +79,21 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
     return '';
   }, [running, session]);
 
-  const configured = settings.apiKey.trim().length > 0;
+  const configured = isAIConfigured(settings);
+  const providerLabel = getProviderDefinition(settings.providerId).label;
+  const resolvedConfig = resolveAISettings(settings);
+  const effortResolution = mapEffortForRequest({
+    providerId: resolvedConfig.providerId,
+    protocol: resolvedConfig.protocol,
+    modelId: resolvedConfig.model,
+    requested: resolvedConfig.reasoningEffort,
+    stored: resolvedConfig.effortCapability,
+  });
+  const effortWarning =
+    resolvedConfig.reasoningEffort !== '' && !effortResolution.applied
+      ? (effortResolution.note ??
+        'The saved reasoning effort is not supported by this model. Requests use the provider default.')
+      : null;
 
   /* -------------------------------------------------------------- */
   /* Selection → branch action                                      */
@@ -166,14 +183,23 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
       openSettings();
       return;
     }
+    if (outcome.code === 'INVALID_CONFIG') {
+      engine.notify(outcome.message, 'error');
+      openSettings();
+      return;
+    }
     engine.notify(outcome.message, outcome.code === 'EMPTY' ? 'info' : 'error');
   };
 
   const retry = (): void => {
     const outcome = chatRuntime.retry(nodeId);
     if (outcome.ok) return;
-    if (outcome.code === 'NO_KEY') openSettings();
-    else engine.notify(outcome.message, 'error');
+    if (outcome.code === 'NO_KEY' || outcome.code === 'INVALID_CONFIG') {
+      if (outcome.code === 'INVALID_CONFIG') engine.notify(outcome.message, 'error');
+      openSettings();
+    } else {
+      engine.notify(outcome.message, 'error');
+    }
   };
 
   const handleComposerChange = (event: React.ChangeEvent<HTMLTextAreaElement>): void => {
@@ -285,9 +311,16 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
 
       {!configured ? (
         <div className="ai-chat__notice" role="status">
-          <span>Add an API key in Settings to start a conversation.</span>
+          <span>Add a {providerLabel} API key in Settings to start a conversation.</span>
           <button type="button" className="button" onClick={openSettings}>
             Open settings
+          </button>
+        </div>
+      ) : effortWarning ? (
+        <div className="ai-chat__notice" role="status">
+          <span>{effortWarning}</span>
+          <button type="button" className="button" onClick={openSettings}>
+            Review settings
           </button>
         </div>
       ) : null}
@@ -300,7 +333,11 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
           onChange={handleComposerChange}
           onKeyDown={handleComposerKeyDown}
           onFocus={() => engine.clearBranchActionFor(nodeId)}
-          placeholder={configured ? 'Message this window…  (Enter to send)' : 'Add a key in Settings to chat…'}
+          placeholder={
+            configured
+              ? `Message this window…  (${providerLabel}, Enter to send)`
+              : 'Add a key in Settings to chat…'
+          }
           aria-label="Message"
           rows={2}
           spellCheck

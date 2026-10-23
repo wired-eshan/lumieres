@@ -9,6 +9,7 @@
  * undo reverses a typing burst rather than a single keystroke.
  */
 
+import { MAX_HISTORY_ENTRIES } from '../config';
 import { insertNodes, removeNodes } from './graphOperations';
 import type { GraphDocument, GraphEdge, NodeId, NoteNode } from './types';
 
@@ -54,7 +55,6 @@ export interface HistoryState {
 
 export const EMPTY_HISTORY: HistoryState = { past: [], future: [] };
 
-const MAX_ENTRIES = 200;
 /** Text edits within this window on the same node merge into one undo step. */
 const COALESCE_MS = 700;
 
@@ -125,7 +125,7 @@ export function canRedo(history: HistoryState): boolean {
 
 /**
  * Pushes a patch, coalescing compatible text edits and dropping the oldest
- * entries past `MAX_ENTRIES`.
+ * entries past `MAX_HISTORY_ENTRIES`.
  */
 export function pushPatch(
   history: HistoryState,
@@ -144,7 +144,7 @@ export function pushPatch(
     past.push({ patch, at: now });
   }
 
-  while (past.length > MAX_ENTRIES) past.shift();
+  while (past.length > MAX_HISTORY_ENTRIES) past.shift();
   return { past, future: [] };
 }
 

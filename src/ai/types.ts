@@ -11,6 +11,7 @@
  *  - status, messages and cancellation are per node, never global
  */
 
+import { AI_CONTEXT_BUDGET } from '../config';
 import type { NodeId } from '../graph/types';
 
 export type AIRequestId = string;
@@ -105,11 +106,8 @@ export interface AINodeContext {
   budget: AIContextBudget;
 }
 
-export const DEFAULT_CONTEXT_BUDGET: AIContextBudget = {
-  maxCharacters: 8_000,
-  maxAncestors: 4,
-  minAncestorCharacters: 160,
-};
+/** Character budget defaults; values are owned by `src/config.ts`. */
+export const DEFAULT_CONTEXT_BUDGET: AIContextBudget = { ...AI_CONTEXT_BUDGET };
 
 /* ------------------------------------------------------------------ */
 /* Requests                                                            */

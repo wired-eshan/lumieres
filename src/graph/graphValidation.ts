@@ -5,9 +5,17 @@
  * integrity assertion after arbitrary operation sequences.
  */
 
+import {
+  MAX_CHILDREN_PER_NODE,
+  MAX_NODE_CONTENT_LENGTH,
+  MAX_NODE_HEIGHT,
+  MAX_NODE_WIDTH,
+  MIN_NODE_HEIGHT,
+  MIN_NODE_WIDTH,
+} from '../config';
 import { createEdgeId } from '../utils/id';
-import { MAX_NODE_WIDTH, MIN_NODE_HEIGHT, MIN_NODE_WIDTH, MAX_NODE_HEIGHT, clampNodeSize, defaultNodeSize } from './metrics';
-import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH, SCHEMA_VERSION } from './types';
+import { clampNodeSize, defaultNodeSize } from './metrics';
+import { SCHEMA_VERSION } from './types';
 import type { ChatMessage, GraphDocument, NodeId, NoteNode } from './types';
 
 export interface ValidationIssue {

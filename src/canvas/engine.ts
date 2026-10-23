@@ -21,16 +21,16 @@ import {
   previewDeletion,
   type DeletionPreview,
 } from '../graph/graphOperations';
-import {
-  MAX_CHILDREN_PER_NODE,
-  type GraphDocument,
-  type NodeId,
-  type NoteNode,
-  type Point,
-  type Rect,
-  type SourceReference,
-  type WindowKind,
-  type WindowSize,
+import { MAX_CHILDREN_PER_NODE } from '../config';
+import type {
+  GraphDocument,
+  NodeId,
+  NoteNode,
+  Point,
+  Rect,
+  SourceReference,
+  WindowKind,
+  WindowSize,
 } from '../graph/types';
 import { clampNodeSize } from '../graph/metrics';
 import { boundsOf, resolveChildPosition } from '../graph/layout';

@@ -44,7 +44,10 @@ export function App(): ReactNode {
         engine.setDocument(nextDoc, change);
         // A deleted/reset window cannot finish a stream usefully; release its
         // request and per-node session instead of leaving it running invisibly.
-        for (const id of change.removed) chatRuntime.dispose(id);
+        // A load/import replacement invalidates every session and continuation
+        // id; undo/redo also sets `full` but must not abort unrelated streams.
+        if (change.replaced) chatRuntime.disposeAll();
+        else for (const id of change.removed) chatRuntime.dispose(id);
       }),
     [controller, engine],
   );

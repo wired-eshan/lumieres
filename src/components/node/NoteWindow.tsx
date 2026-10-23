@@ -33,7 +33,7 @@ import {
   NODE_FOOTER_HEIGHT,
   NODE_HEADER_HEIGHT,
 } from '../../graph/metrics';
-import { MAX_CHILDREN_PER_NODE } from '../../graph/types';
+import { MAX_CHILDREN_PER_NODE } from '../../config';
 import { limitMessage, limitStatus } from '../../editor/characterLimit';
 import { formatCount } from '../../utils/misc';
 import { NoteEditor } from './NoteEditor';

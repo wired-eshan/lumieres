@@ -17,9 +17,14 @@
  * total concurrency so a burst of windows cannot open unlimited connections.
  */
 
+import {
+  DELTA_FLUSH_MS,
+  MAX_CONCURRENT_REQUESTS,
+  MAX_NODE_CONTENT_LENGTH,
+} from '../config';
 import type { GraphController } from '../graph/graphController';
 import { graphController } from '../graph/graphController';
-import { MAX_NODE_CONTENT_LENGTH, type ChatMessage, type NodeId } from '../graph/types';
+import type { ChatMessage, NodeId } from '../graph/types';
 import { createId } from '../utils/id';
 import { truncate } from '../utils/misc';
 import {
@@ -28,20 +33,25 @@ import {
   type ChatTurn,
 } from './chatContext';
 import {
-  AIRequestError,
   streamChat,
   type StreamChatInput,
   type StreamChatResult,
 } from './chatService';
+import { ContinuationStore } from './continuationStore';
+import { describeError } from './errors';
+import { validateProviderConfig, type ResolvedProviderConfig } from './provider';
 import { aiSessionStore, type AISessionStore } from './sessionStore';
-import { getAISettings, type AISettings } from './settings';
+import { getAISettings, resolveAISettings, type AISettings } from './settings';
 
-export const MAX_CONCURRENT_REQUESTS = 4;
-/** Deltas are batched to this cadence before touching the session store. */
-const DELTA_FLUSH_MS = 50;
+/**
+ * Global request cap, owned by `src/config.ts`. Re-exported for callers that
+ * treat the runtime as the source of its operating limits.
+ */
+export { MAX_CONCURRENT_REQUESTS };
 
 export type ChatSendCode =
   | 'NO_KEY'
+  | 'INVALID_CONFIG'
   | 'NOT_AI_WINDOW'
   | 'EMPTY'
   | 'TOO_LONG'
@@ -56,6 +66,11 @@ interface StreamState {
   nodeId: NodeId;
   requestId: string;
   controller: AbortController;
+  config: ResolvedProviderConfig;
+  /** Full normalized history this response will cover, for continuation. */
+  history: ChatTurn[];
+  /** True when this request is riding a provider continuation id. */
+  usedContinuation: boolean;
   text: string;
   pending: string;
   timer: ReturnType<typeof setTimeout> | null;
@@ -73,6 +88,8 @@ export interface ChatRuntimeDeps {
   sessions: AISessionStore;
   getSettings: () => AISettings;
   stream: (input: StreamChatInput) => Promise<StreamChatResult>;
+  /** In-memory provider-continuation ids; separate from the document. */
+  continuations?: ContinuationStore;
   now: () => number;
   newId: (prefix: string) => string;
   /** Override the global request cap (tests, or a future settings surface). */
@@ -82,10 +99,12 @@ export interface ChatRuntimeDeps {
 export class ChatRuntime {
   private readonly deps: ChatRuntimeDeps;
   private readonly streams = new Map<NodeId, StreamState>();
+  private readonly continuations: ContinuationStore;
   private readonly maxConcurrent: number;
 
   constructor(deps: ChatRuntimeDeps) {
     this.deps = deps;
+    this.continuations = deps.continuations ?? new ContinuationStore(deps.now);
     this.maxConcurrent = Math.max(1, deps.maxConcurrentRequests ?? MAX_CONCURRENT_REQUESTS);
   }
 
@@ -110,13 +129,19 @@ export class ChatRuntime {
 
   /** Appends the user turn, then starts one independent request for this node. */
   send(nodeId: NodeId, rawText: string): ChatSendOutcome {
-    const settings = this.deps.getSettings();
-    if (settings.apiKey.trim().length === 0) {
+    const config = resolveAISettings(this.deps.getSettings());
+    if (config.apiKey.length === 0) {
       return {
         ok: false,
         code: 'NO_KEY',
-        message: 'Add an API key in Settings to start chatting.',
+        message: `Add a ${config.definition.label} API key in Settings to start chatting.`,
       };
+    }
+    const configIssue = validateProviderConfig(config).find(
+      (issue) => issue.code !== 'missing_api_key',
+    );
+    if (configIssue) {
+      return { ok: false, code: 'INVALID_CONFIG', message: configIssue.message };
     }
 
     const doc = this.deps.controller.getDocument();
@@ -168,14 +193,24 @@ export class ChatRuntime {
 
     const current = this.deps.controller.getDocument();
     const history = selectConversationHistory(current.nodes[nodeId]?.chat ?? []);
-    return this.start(nodeId, history, settings);
+    return this.start(nodeId, history, config);
   }
 
   /** Re-sends the latest user turn without appending a duplicate. */
   retry(nodeId: NodeId): ChatSendOutcome {
-    const settings = this.deps.getSettings();
-    if (settings.apiKey.trim().length === 0) {
-      return { ok: false, code: 'NO_KEY', message: 'Add an API key in Settings to retry.' };
+    const config = resolveAISettings(this.deps.getSettings());
+    if (config.apiKey.length === 0) {
+      return {
+        ok: false,
+        code: 'NO_KEY',
+        message: `Add a ${config.definition.label} API key in Settings to retry.`,
+      };
+    }
+    const configIssue = validateProviderConfig(config).find(
+      (issue) => issue.code !== 'missing_api_key',
+    );
+    if (configIssue) {
+      return { ok: false, code: 'INVALID_CONFIG', message: configIssue.message };
     }
 
     const node = this.deps.controller.getDocument().nodes[nodeId];
@@ -203,7 +238,7 @@ export class ChatRuntime {
       };
     }
     const history = selectConversationHistory(node.chat.slice(0, lastUserIndex + 1));
-    return this.start(nodeId, history, settings);
+    return this.start(nodeId, history, config);
   }
 
   /** Stops this node's request and keeps any partial response. */
@@ -220,21 +255,46 @@ export class ChatRuntime {
       state.controller.abort();
     }
     this.deps.sessions.disposeSession(nodeId);
+    this.continuations.clear(nodeId);
   }
 
   /** Aborts every in-flight request (document replaced by an import). */
   disposeAll(): void {
     for (const nodeId of [...this.streams.keys()]) this.dispose(nodeId);
     this.deps.sessions.clear();
+    this.continuations.clearAll();
   }
 
   private start(
     nodeId: NodeId,
     history: ChatTurn[],
-    settings: AISettings,
+    config: ResolvedProviderConfig,
   ): ChatSendOutcome {
     if (history.length === 0) {
       return { ok: false, code: 'EMPTY', message: 'Type a message first.' };
+    }
+
+    // Continuation is opt-in per capability and only valid for a strict append
+    // extension of the turns that produced the previous response. Otherwise the
+    // complete normalized history is sent. A provider/model switch invalidates
+    // the stored id (including ids that belonged to a different provider).
+    let messages = history;
+    let previousResponseId: string | undefined;
+    let usedContinuation = false;
+    if (config.continuationEnabled) {
+      const match = this.continuations.resolve(
+        nodeId,
+        config.providerId,
+        config.model,
+        history,
+      );
+      if (match) {
+        messages = match.turns;
+        previousResponseId = match.responseId;
+        usedContinuation = true;
+      }
+    } else {
+      this.continuations.clear(nodeId);
     }
 
     const requestId = this.deps.newId('req');
@@ -243,6 +303,9 @@ export class ChatRuntime {
       nodeId,
       requestId,
       controller,
+      config,
+      history: history.map((turn) => ({ role: turn.role, content: turn.content })),
+      usedContinuation,
       text: '',
       pending: '',
       timer: null,
@@ -256,12 +319,10 @@ export class ChatRuntime {
     const system = buildChatSystemPrompt(doc, nodeId);
 
     void this.execute(state, {
-      apiKey: settings.apiKey,
-      baseUrl: settings.baseUrl,
-      model: settings.model,
-      reasoningEffort: settings.reasoningEffort,
+      config,
       system,
-      messages: history,
+      messages,
+      previousResponseId,
       signal: controller.signal,
       onText: (delta) => this.onDelta(state, delta),
     });
@@ -304,6 +365,7 @@ export class ChatRuntime {
       const finalText = result.text.trim().length > 0 ? result.text : state.text;
       if (!this.deps.sessions.isActive(state.nodeId, state.requestId)) return;
       if (finalText.trim().length === 0) {
+        if (state.usedContinuation) this.continuations.clear(state.nodeId);
         this.deps.sessions.fail(state.nodeId, state.requestId, 'The model returned an empty response.');
         this.streams.delete(state.nodeId);
         return;
@@ -315,6 +377,23 @@ export class ChatRuntime {
         content: finalText,
         createdAt: this.deps.now(),
       });
+      // The provider id is stored only in memory and only when this provider
+      // supports continuation. A full-history request that returns no id leaves
+      // nothing stale behind.
+      if (result.responseId && state.config.continuationEnabled) {
+        // The provider's continuation covers its input plus this reply, so the
+        // stored history must include the assistant turn. The next request then
+        // sends only the new user turn.
+        this.continuations.record(
+          state.nodeId,
+          state.config.providerId,
+          state.config.model,
+          result.responseId,
+          [...state.history, { role: 'assistant', content: finalText }],
+        );
+      } else {
+        this.continuations.clear(state.nodeId);
+      }
       this.deps.sessions.complete(state.nodeId, state.requestId, finalText);
       // The persisted document now owns the text; drop the streaming buffer.
       this.deps.sessions.disposeSession(state.nodeId);
@@ -327,10 +406,17 @@ export class ChatRuntime {
       // the flag stops the rejection handler from appending it twice.
       if (state.interrupted) {
         this.persistPartialOnce(state);
+        // The persisted partial reply extends the document history, so the
+        // previous continuation no longer describes an append-only chain.
+        this.continuations.clear(state.nodeId);
         this.deps.sessions.disposeSession(state.nodeId);
         this.streams.delete(state.nodeId);
         return;
       }
+
+      // A failed continuation must not poison the next attempt: fall back to
+      // full history rather than resending the same rejected id.
+      if (state.usedContinuation) this.continuations.clear(state.nodeId);
 
       if (this.streams.get(state.nodeId) !== state) return;
       if (!this.deps.sessions.isActive(state.nodeId, state.requestId)) {
@@ -338,12 +424,10 @@ export class ChatRuntime {
         return;
       }
 
-      const message =
-        error instanceof AIRequestError
-          ? error.message
-          : error instanceof Error
-            ? error.message
-            : 'The request failed.';
+      const message = describeError(error, {
+        secrets: [state.config.apiKey],
+        providerLabel: state.config.definition.label,
+      });
       this.deps.sessions.fail(state.nodeId, state.requestId, message);
       this.streams.delete(state.nodeId);
     }

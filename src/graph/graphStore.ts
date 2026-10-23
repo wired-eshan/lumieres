@@ -59,9 +59,21 @@ export interface ChangeHint {
   removed: NodeId[];
   /** A wholesale replacement happened; rebuild all derived caches. */
   full: boolean;
+  /**
+   * The document object was replaced by load/import rather than by undo/redo.
+   * `full` alone cannot carry this distinction: undo and redo also rebuild the
+   * whole document, but they must not abort unrelated in-flight AI requests.
+   */
+  replaced: boolean;
 }
 
-const NO_CHANGE: ChangeHint = { ids: [], added: [], removed: [], full: false };
+const NO_CHANGE: ChangeHint = {
+  ids: [],
+  added: [],
+  removed: [],
+  full: false,
+  replaced: false,
+};
 
 export interface AddBranchInput {
   position?: Point;
@@ -407,7 +419,7 @@ export const useGraphStore = create<GraphStoreState>((set, get) => {
       set((state) => ({
         doc,
         revision: state.revision + 1,
-        lastChange: hint({ full: true }),
+        lastChange: hint({ full: true, replaced: true }),
         history: options.resetHistory === false ? state.history : EMPTY_HISTORY,
       }));
     },

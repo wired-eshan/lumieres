@@ -2,7 +2,7 @@
  * Context assembly for future AI requests.
  *
  * The requirement that shapes this module: *do not concatenate every ancestor's
- * full 20,000-character note into a request*. Context is assembled
+ * full note into a request*. Context is assembled
  * nearest-ancestor-first under an explicit character budget, with each ancestor
  * contributing only as much as the remaining budget allows.
  *

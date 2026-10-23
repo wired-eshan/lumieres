@@ -16,6 +16,7 @@
 
 import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useEngine, useEngineSnapshot } from '../../app/EngineContext';
+import { MAX_CHILDREN_PER_NODE } from '../../config';
 import { useGraphStore } from '../../graph/graphStore';
 import { truncate } from '../../utils/misc';
 import { BranchIcon } from '../icons';
@@ -40,7 +41,7 @@ export function BranchAction(): ReactNode {
   const childCount = sourceNode
     ? Object.values(doc.nodes).filter((candidate) => candidate.parentId === sourceNode.id).length
     : 0;
-  const atLimit = childCount >= 50;
+  const atLimit = childCount >= MAX_CHILDREN_PER_NODE;
 
   // The preview line and the limit warning change the action's width and height;
   // measuring after a commit keeps that read out of the engine's frame loop.
@@ -72,7 +73,7 @@ export function BranchAction(): ReactNode {
         disabled={atLimit}
         title={
           atLimit
-            ? 'Branch limit reached — this window already has 50 branches'
+            ? `Branch limit reached — this window already has ${MAX_CHILDREN_PER_NODE} branches`
             : 'Create a new window branching from the selected text'
         }
       >

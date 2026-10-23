@@ -7,6 +7,7 @@
  * builds from the browser console (`__lumieresStress(5000)`).
  */
 
+import { MAX_CHILDREN_PER_NODE } from '../config';
 import { createEmptyDocument, createNoteNode } from '../graph/graphOperations';
 import { resolveChildPosition } from '../graph/layout';
 import { nodeSize } from '../graph/metrics';
@@ -16,7 +17,7 @@ import { SCHEMA_VERSION, type GraphDocument, type GraphEdge, type NodeId, type N
 
 export interface StressGraphOptions {
   totalNodes?: number;
-  /** Children per node before the structure widens. Hard-capped at 50. */
+  /** Children per node before the structure widens. Capped by the graph limit. */
   branching?: number;
   /** Seed text length per note, in characters. */
   contentLength?: number;
@@ -65,7 +66,10 @@ function sentence(seed: number, length: number): string {
  */
 export function createStressGraph(options: StressGraphOptions = {}): GraphDocument {
   const totalNodes = Math.max(1, options.totalNodes ?? 5000);
-  const branching = Math.min(50, Math.max(1, options.branching ?? 12));
+  const branching = Math.min(
+    MAX_CHILDREN_PER_NODE,
+    Math.max(1, options.branching ?? 12),
+  );
   const contentLength = options.contentLength ?? 180;
   const now = Date.now();
 

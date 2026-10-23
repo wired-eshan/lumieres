@@ -13,8 +13,8 @@
  *  - shadows and rounded corners skipped at low zoom
  */
 
+import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../config';
 import type { GraphDocument, NodeId, Point, Rect, WindowSize } from '../graph/types';
-import { MAX_NODE_CONTENT_LENGTH } from '../graph/types';
 import { compareRenderOrder, getNode, evaluateSourceReference } from '../graph/graphOperations';
 import {
   BODY_LINE_HEIGHT,
@@ -545,9 +545,11 @@ export class GraphRenderer {
     const children = countChildren(doc, nodeId);
     if (children > 0) {
       ctx.textAlign = 'right';
-      ctx.fillStyle = children >= 50 ? palette.warning : palette.textFaint;
+      ctx.fillStyle = children >= MAX_CHILDREN_PER_NODE ? palette.warning : palette.textFaint;
       ctx.fillText(
-        children >= 50 ? `branch limit · ${children}/50` : `${children}/50 branches`,
+        children >= MAX_CHILDREN_PER_NODE
+          ? `branch limit · ${children}/${MAX_CHILDREN_PER_NODE}`
+          : `${children}/${MAX_CHILDREN_PER_NODE} branches`,
         rect.width - NODE_CONTENT_PADDING,
         footerY + NODE_FOOTER_HEIGHT / 2,
       );
