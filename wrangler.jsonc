@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lumieres",
+  "compatibility_date": "2026-10-23",
+  // The app is a fully client-side SPA. Wrangler uploads `dist/` as static
+  // assets and runs no application Worker code.
+  "assets": {
+    "directory": "./dist",
+    // Serve index.html for unknown paths, so deep links and refreshes work.
+    "not_found_handling": "single-page-application"
+  }
+}

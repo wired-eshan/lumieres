@@ -5,4 +5,5 @@ coverage
 *.local
 .DS_Store
 .vite
+.wrangler
 *.log

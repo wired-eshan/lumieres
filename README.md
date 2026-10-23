@@ -21,10 +21,48 @@ npm run dev        # http://localhost:5173
 | `npm run dev` | Vite dev server with HMR |
 | `npm run build` | Typecheck, then production build into `dist/` |
 | `npm run preview` | Serve the production build |
+| `npm run preview:cloudflare` | Build and serve the Cloudflare Worker locally |
+| `npm run deploy` | Build and deploy to Cloudflare |
+| `npm run deploy:dry-run` | Build and validate the upload without deploying |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
 | `npm test` | Vitest (419 tests) |
 
-Requires Node 20+. The app is fully client-side; there is no backend to run.
+Requires Node 20+ for development and Node 22+ for the Wrangler deployment
+scripts. The app is fully client-side; there is no backend to run.
+
+### Deploying to Cloudflare
+
+The production build is hosted as a Cloudflare Worker with static assets — no
+server code, bindings, or runtime secrets. [`wrangler.jsonc`](./wrangler.jsonc)
+uploads `dist/` and serves `index.html` for unknown paths, while
+[`public/_headers`](./public/_headers) adds immutable caching for fingerprinted
+assets plus basic security headers.
+
+```bash
+npx wrangler login      # once per machine
+npm run deploy          # build, then upload to Cloudflare
+```
+
+Wrangler prints the deployment URL
+(`https://lumieres.<your-subdomain>.workers.dev`). To attach a custom domain,
+add it under **Workers & Pages → lumieres → Settings → Domains & Routes** in the
+Cloudflare dashboard.
+
+| Script | What it does |
+| --- | --- |
+| `npm run preview:cloudflare` | Build and serve the Worker locally at http://localhost:8787 |
+| `npm run deploy` | Build and deploy to Cloudflare |
+| `npm run deploy:dry-run` | Build and validate the upload without deploying |
+
+Two origin-scoped caveats:
+
+- Canvases live in IndexedDB and provider keys in `localStorage`, both scoped to
+  the page's origin. A canvas or key saved on `localhost` is not visible at the
+  deployed URL — enter the key again and import/export canvases if you need to
+  move them.
+- The Worker only serves files. AI requests still go directly from the browser
+  to the provider you configure, so the provider must allow browser CORS
+  requests, exactly as it must in local development.
 
 ### AI setup
 
