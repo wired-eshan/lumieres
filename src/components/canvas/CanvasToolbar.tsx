@@ -78,6 +78,7 @@ export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarPro
           <BranchIcon size={15} />
         </span>
         <input
+          id="tour-canvas-title"
           className="toolbar__title"
           value={title}
           onChange={(event) => setTitle(event.target.value)}
@@ -105,61 +106,66 @@ export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarPro
 
         <span className="toolbar__divider" />
 
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => engine.undo()}
-          disabled={!canUndo}
-          title="Undo (⌘Z)"
-          aria-label="Undo"
-        >
-          <UndoIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => engine.redo()}
-          disabled={!canRedo}
-          title="Redo (⇧⌘Z)"
-          aria-label="Redo"
-        >
-          <RedoIcon />
-        </button>
+        <div className="toolbar__group" id="tour-history">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => engine.undo()}
+            disabled={!canUndo}
+            title="Undo (⌘Z)"
+            aria-label="Undo"
+          >
+            <UndoIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => engine.redo()}
+            disabled={!canRedo}
+            title="Redo (⇧⌘Z)"
+            aria-label="Redo"
+          >
+            <RedoIcon />
+          </button>
+        </div>
 
         <span className="toolbar__divider" />
 
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => downloadDocument(doc)}
-          title="Export this canvas as JSON (⌘E)"
-          aria-label="Export canvas"
-        >
-          <DownloadIcon />
-        </button>
-        <button
-          type="button"
-          className="icon-button"
-          onClick={() => fileInputRef.current?.click()}
-          title="Import a canvas from JSON (⌘O)"
-          aria-label="Import canvas"
-        >
-          <UploadIcon />
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="application/json,.json"
-          className="visually-hidden"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            event.target.value = '';
-            if (file) void handleImport(file);
-          }}
-        />
+        <div className="toolbar__group" id="tour-transfer">
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => downloadDocument(doc)}
+            title="Export this canvas as JSON (⌘E)"
+            aria-label="Export canvas"
+          >
+            <DownloadIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            onClick={() => fileInputRef.current?.click()}
+            title="Import a canvas from JSON (⌘O)"
+            aria-label="Import canvas"
+          >
+            <UploadIcon />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="visually-hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) void handleImport(file);
+            }}
+          />
+        </div>
 
         <button
           type="button"
+          id="tour-reset"
           className="icon-button is-danger"
           onClick={() => engine.requestReset()}
           title="Reset the canvas — removes every note"
@@ -169,6 +175,7 @@ export function CanvasToolbar({ onIssues, onHelp, onSettings }: CanvasToolbarPro
         </button>
         <button
           type="button"
+          id="tour-settings"
           className="icon-button"
           onClick={onSettings}
           title="AI settings — provider, API key, model and effort"

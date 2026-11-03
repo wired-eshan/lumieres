@@ -9,6 +9,8 @@
  * environment's is not functional.
  */
 
+import { TOUR_COMPLETION_KEY } from '../onboarding/tourConfig';
+
 const STORAGE_METHODS = ['setItem', 'getItem', 'removeItem', 'clear', 'key'] as const;
 
 function isFunctional(candidate: unknown): boolean {
@@ -49,6 +51,15 @@ function createMemoryStorage(): Storage {
  */
 if (typeof HTMLCanvasElement !== 'undefined') {
   HTMLCanvasElement.prototype.getContext = (() => null) as unknown as HTMLCanvasElement['getContext'];
+}
+
+/**
+ * jsdom implements `scrollTo` only as a "not implemented" error. The onboarding
+ * tour's scroll lock restores scroll position on close, which is harmless in
+ * tests but would otherwise print an error on every unmount.
+ */
+if (typeof window !== 'undefined') {
+  window.scrollTo = () => undefined;
 }
 
 /** jsdom has no ResizeObserver, which the canvas uses to track its own size. */
@@ -108,4 +119,13 @@ if (typeof window !== 'undefined' && !isFunctional(window.localStorage)) {
     configurable: true,
     writable: true,
   });
+}
+
+/**
+ * The product tour auto-opens on first visit. Mark it complete by default so
+ * existing shell/integration tests are not covered by its modal overlay;
+ * `ProductTour.test.tsx` clears the flag when it exercises the tour itself.
+ */
+if (typeof window !== 'undefined') {
+  window.localStorage.setItem(TOUR_COMPLETION_KEY, 'true');
 }

@@ -42,9 +42,10 @@ const AI_SHORTCUTS: Array<[string, string]> = [
 export interface HelpPanelProps {
   open: boolean;
   onClose: () => void;
+  onReplayTour: () => void;
 }
 
-export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
+export function HelpPanel({ open, onClose, onReplayTour }: HelpPanelProps): ReactNode {
   const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -75,9 +76,20 @@ export function HelpPanel({ open, onClose }: HelpPanelProps): ReactNode {
           <h2 className="modal__title" id="help-title">
             How Lumières works
           </h2>
-          <button type="button" className="icon-button" onClick={onClose} aria-label="Close help" ref={closeRef}>
-            <CloseIcon />
-          </button>
+          <div className="modal__header-actions">
+            <button type="button" className="button" onClick={onReplayTour}>
+              Replay tour
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              onClick={onClose}
+              aria-label="Close help"
+              ref={closeRef}
+            >
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         <div className="modal__body">

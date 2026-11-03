@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run deploy` | Build and deploy to Cloudflare |
 | `npm run deploy:dry-run` | Build and validate the upload without deploying |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
-| `npm test` | Vitest (419 tests) |
+| `npm test` | Vitest (421 tests) |
 
 Requires Node 20+ for development and Node 22+ for the Wrangler deployment
 scripts. The app is fully client-side; there is no backend to run.
@@ -178,6 +178,10 @@ limit or a provider is one edit.
   history rather than text edits and deliberately stay outside the undo stack.
 - **Local persistence** — debounced autosave to IndexedDB, restored on refresh,
   plus JSON import/export including modes, sizes and conversations.
+- **First-run guided tour** — `reactjs-onboarding` spotlights the canvas title,
+  undo/redo, import/export, reset, settings, the note/AI mode switch and
+  highlight-to-branch. The tooltip is themed dark to match the workspace. It
+  opens once per browser, then can be replayed from **Help → Replay tour**.
 
 ### Keyboard
 
@@ -218,7 +222,8 @@ src/
     continuationStore.ts  in-memory provider response ids, invalidated on switch
     settings.ts       per-provider keys/profiles in browser-local storage
     models.ts         provider-aware model discovery and metadata
-  components/  React: canvas host, window frame, note editor, AI chat, panels
+  components/  React: canvas host, window frame, note editor, AI chat, panels, tour
+  onboarding/  tour step targets and copy (consumed by components/onboarding)
   app/         shell, boot sequence, engine context, UI commands
 ```
 

@@ -1,0 +1,86 @@
+/**
+ * Dark theme for the `reactjs-onboarding` tooltip.
+ *
+ * The library ships a light tooltip and styles every part of it with inline
+ * declarations, so an ordinary class rule cannot win. Every override therefore
+ * uses `!important`, and selectors are scoped to the one fixed wrapper the
+ * library positions at z-index 100000 (nothing else in the app uses that
+ * value). This keeps the third-party component unmodified while matching the
+ * app's panel, text and accent tokens.
+ */
+
+.app > div[style*='z-index: 100000'] > div:last-child {
+  background: var(--bg-elevated) !important;
+  border: 1px solid var(--panel-border);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    0 18px 46px rgba(0, 0, 0, 0.55) !important;
+}
+
+/* Caret: a rotated square whose colour must match the panel behind it. */
+.app > div[style*='z-index: 100000'] > div[style*='rotate(45deg)'] {
+  background: var(--bg-elevated) !important;
+  box-shadow: none !important;
+}
+
+/* Message well and footer share the panel background; the footer is lifted. */
+.app > div[style*='z-index: 100000'] > div:last-child > div {
+  background: var(--bg-elevated) !important;
+}
+
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child {
+  background: rgba(255, 255, 255, 0.035) !important;
+  border-top: 1px solid var(--panel-border) !important;
+}
+
+.app > div[style*='z-index: 100000'] p {
+  color: var(--text) !important;
+  font-family: var(--font-sans) !important;
+}
+
+/* Close (“skip”) control. */
+.app > div[style*='z-index: 100000'] button[aria-label='Skip tour'] {
+  color: var(--text-muted) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.app > div[style*='z-index: 100000'] button[aria-label='Skip tour']:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: var(--text) !important;
+}
+
+/* Back is a quiet text button; Next/Done is the app's primary button. */
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child > button:first-child {
+  background: transparent !important;
+  color: var(--text-muted) !important;
+  font-family: var(--font-sans) !important;
+}
+
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child > button:first-child:disabled {
+  color: var(--text-faint) !important;
+}
+
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child > button:last-child {
+  background: rgba(124, 140, 248, 0.22) !important;
+  border: 1px solid rgba(124, 140, 248, 0.5) !important;
+  border-radius: 7px !important;
+  color: #eef0ff !important;
+  font-family: var(--font-sans) !important;
+}
+
+/* Step dots: muted by default, accent for the current step. */
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child > div span {
+  background: rgba(255, 255, 255, 0.18) !important;
+}
+
+.app > div[style*='z-index: 100000']
+  > div:last-child
+  > div:last-child
+  > div
+  span[style*='width: 7px'] {
+  background: var(--accent) !important;
+}
+
+.app > div[style*='z-index: 100000'] > div:last-child > div:last-child > span {
+  color: var(--text-faint) !important;
+}

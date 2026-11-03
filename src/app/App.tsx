@@ -16,6 +16,7 @@ import { createDocumentRepository, type RepositoryKind } from '../persistence/do
 import { chatRuntime } from '../ai/chatRuntime';
 import { GraphCanvas } from '../components/canvas/GraphCanvas';
 import { CanvasToolbar } from '../components/canvas/CanvasToolbar';
+import { ProductTour, type ProductTourHandle } from '../components/onboarding/ProductTour';
 import { ConfirmDialog } from '../components/panels/ConfirmDialog';
 import { HelpPanel } from '../components/panels/HelpPanel';
 import { IssueBanner } from '../components/panels/IssueBanner';
@@ -35,6 +36,7 @@ export function App(): ReactNode {
   const [notes, setNotes] = useState<string[]>([]);
   const [repositoryKind, setRepositoryKind] = useState<RepositoryKind>('memory');
   const autosaveRef = useRef<AutosaveController | null>(null);
+  const tourRef = useRef<ProductTourHandle>(null);
 
   // --- Store → engine bridge. Every document change reaches the renderer with
   // a hint about which nodes moved, so no full-graph diffing happens per edit.
@@ -122,6 +124,11 @@ export function App(): ReactNode {
     setNotes([]);
   }, []);
 
+  const replayTour = useCallback(() => {
+    setHelpOpen(false);
+    tourRef.current?.start();
+  }, []);
+
   const focusNode = useCallback(
     (nodeId: string) => {
       engine.setSelection([nodeId]);
@@ -169,8 +176,13 @@ export function App(): ReactNode {
 
         <Toasts />
         <ConfirmDialog />
-        <HelpPanel open={helpOpen} onClose={() => setHelpOpen(false)} />
+        <HelpPanel
+          open={helpOpen}
+          onClose={() => setHelpOpen(false)}
+          onReplayTour={replayTour}
+        />
         <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+        <ProductTour ref={tourRef} ready={ready} />
 
         {!ready ? (
           <div className="boot-overlay" role="status" aria-live="polite">

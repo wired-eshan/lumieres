@@ -9,6 +9,7 @@
 @import './canvas.css';
 @import './node.css';
 @import './panels.css';
+@import './onboarding.css';
 
 :root {
   --bg: #0a0c11;
@@ -122,6 +123,14 @@ textarea {
   align-items: center;
   gap: 8px;
   min-width: 0;
+}
+
+/* Groups related controls so the onboarding tour can spotlight them together. */
+.toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
 }
 
 .toolbar__mark {

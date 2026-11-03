@@ -311,7 +311,7 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
 
       {!configured ? (
         <div className="ai-chat__notice" role="status">
-          <span>Add a {providerLabel} API key in Settings to start a conversation.</span>
+          <span>Add your API key in Settings to start a conversation.</span>
           <button type="button" className="button" onClick={openSettings}>
             Open settings
           </button>

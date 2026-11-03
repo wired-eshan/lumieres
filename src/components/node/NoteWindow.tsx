@@ -227,7 +227,7 @@ export function NoteWindow({ nodeId }: NoteWindowProps): ReactNode {
     >
       <header className="note-window__header" style={{ height: NODE_HEADER_HEIGHT }}>
         <span className={`note-window__accent${node.id === doc.rootNodeId ? ' is-root' : ''}`} />
-        <div className="mode-toggle" role="group" aria-label="Window mode">
+        <div className="mode-toggle" id="tour-mode-toggle" role="group" aria-label="Window mode">
           <button
             type="button"
             className={`mode-toggle__button${!isAi ? ' is-active' : ''}`}
@@ -302,7 +302,7 @@ export function NoteWindow({ nodeId }: NoteWindowProps): ReactNode {
         </div>
       </header>
 
-      <div className="note-window__main">
+      <div className="note-window__main" id="tour-note-body">
         {sourceEvaluation?.reference ? (
           <div
             className={`note-window__source${sourceEvaluation.status === 'stale' ? ' is-stale' : ''}`}
