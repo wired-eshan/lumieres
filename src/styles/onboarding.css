@@ -66,6 +66,8 @@
   border-radius: 7px !important;
   color: #eef0ff !important;
   font-family: var(--font-sans) !important;
+  padding: 7px 16px !important;
+  line-height: 1.2 !important;
 }
 
 /* Step dots: muted by default, accent for the current step. */
