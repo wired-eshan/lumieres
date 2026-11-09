@@ -16,6 +16,7 @@
 import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../config';
 import type { GraphDocument, NodeId, Point, Rect, WindowSize } from '../graph/types';
 import { compareRenderOrder, getNode, evaluateSourceReference } from '../graph/graphOperations';
+import { collectBodySourceRanges } from '../graph/sourceHighlights';
 import {
   BODY_LINE_HEIGHT,
   GRID_SIZE,
@@ -31,7 +32,7 @@ import { clamp } from '../utils/misc';
 import { visibleWorldRect } from './coordinateTransforms';
 import type { Camera, Viewport } from './camera';
 import type { SpatialGrid } from './spatialIndex';
-import { ellipsize, textLayoutCache } from './textLayout';
+import { ellipsize, rangeToLineSpans, textLayoutCache, measureTextWidth } from './textLayout';
 import { fonts, palette, zoomTier } from './theme';
 
 export interface RenderFrame {
@@ -232,12 +233,26 @@ export class GraphRenderer {
       const childRect = this.rectFor(frame, child.id);
       if (!parentRect || !childRect) continue;
 
+      // A window branched from highlighted text carries a sourceReference. Its
+      // edge is painted in the branch (amber) family so the highlighted phrase
+      // and the edge of the branch that came from it read as one object.
+      const isBranchEdge = child.sourceReference != null;
+
       const isActive = highlightSet.has(parent.id) || highlightSet.has(child.id);
       this.lastDrawnEdges += 1;
 
-      ctx.strokeStyle = isActive ? palette.edgeActive : palette.edge;
-      ctx.lineWidth = isActive ? 2 : 1.5;
-      ctx.globalAlpha = isActive ? 1 : 0.85;
+      // Active = user is touching one of its endpoints; interactively bright, at
+      // 12.3:1 on bg. Else branch edges are the muted amber (6.1:1+), matching
+      // the source phrase; non-branch edges keep the neutral slate (1.8:1).
+      ctx.strokeStyle = isActive
+        ? isBranchEdge
+          ? palette.branchActive
+          : palette.edgeActive
+        : isBranchEdge
+          ? palette.branch
+          : palette.edge;
+      ctx.lineWidth = isActive || isBranchEdge ? 2 : 1.5;
+      ctx.globalAlpha = isActive || isBranchEdge ? 1 : 0.85;
 
       const geometry = edgeGeometry(parentRect, childRect);
       const a = this.toScreen(camera, geometry.from);
@@ -251,7 +266,13 @@ export class GraphRenderer {
       ctx.stroke();
 
       if (camera.zoom > zoomTier.detail) {
-        ctx.fillStyle = isActive ? palette.edgeActive : palette.edge;
+        ctx.fillStyle = isActive
+          ? isBranchEdge
+            ? palette.branchActive
+            : palette.edgeActive
+          : isBranchEdge
+            ? palette.branch
+            : palette.edge;
         drawArrowHead(ctx, b, geometry.direction);
       }
     }
@@ -445,11 +466,13 @@ export class GraphRenderer {
     if (evaluation.reference) {
       const chipY = NODE_HEADER_HEIGHT + NODE_CONTENT_PADDING * 0.5;
       const chipHeight = SOURCE_CHIP_HEIGHT;
-      ctx.fillStyle = palette.chipFill;
+      // The chip belongs to the branch family: it documents the highlighted
+      // phrase the edge came from, so it shares the branch accent.
+      ctx.fillStyle = palette.branchChipFill;
       pathRoundedRect(ctx, NODE_CONTENT_PADDING, chipY, contentWidth, chipHeight, 6);
       ctx.fill();
 
-      ctx.fillStyle = evaluation.status === 'stale' ? palette.warning : palette.accent;
+      ctx.fillStyle = evaluation.status === 'stale' ? palette.warning : palette.branchActive;
       pathRoundedRect(ctx, NODE_CONTENT_PADDING + 5, chipY + 6, 3, chipHeight - 12, 1.5);
       ctx.fill();
 
@@ -500,6 +523,27 @@ export class GraphRenderer {
         bodyBox.y + 2,
       );
     } else {
+      // Highlight the source phrases that children were branched from, but only
+      // while the reference still points at *this* window and matches its live
+      // text (status 'valid'). A stale reference keeps its snapshot in the
+      // child's source chip, itself colour-coded to the branch, without painting
+      // a misaligned range here.
+      const sourceHighlights = isAi ? [] : collectBodySourceRanges(doc, nodeId);
+
+      if (sourceHighlights.length > 0) {
+        ctx.fillStyle = palette.branchHighlightFill;
+        for (const range of sourceHighlights) {
+          for (const span of rangeToLineSpans(layout, range.start, range.end)) {
+            const line = layout.lines[span.line];
+            if (line === undefined) continue;
+            const y = bodyBox.y + span.line * BODY_LINE_HEIGHT;
+            const startX = bodyBox.x + measureTextWidth(line.slice(0, span.from), fonts.body);
+            const endX = bodyBox.x + measureTextWidth(line.slice(0, span.to), fonts.body);
+            ctx.fillRect(startX, y, Math.max(1, endX - startX), BODY_LINE_HEIGHT);
+          }
+        }
+      }
+
       ctx.fillStyle = palette.text;
       let y = bodyBox.y;
       for (let i = 0; i < layout.lines.length; i += 1) {

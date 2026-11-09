@@ -25,9 +25,11 @@ import { useEngine } from '../../app/EngineContext';
 import { useUI } from '../../app/UIContext';
 import { useGraphStore } from '../../graph/graphStore';
 import { NODE_CONTENT_PADDING } from '../../graph/metrics';
+import { collectMessageSourceRanges } from '../../graph/sourceHighlights';
 import type { BranchActionState } from '../../canvas/engine';
 import { CHARACTER_LIMIT, applyTextEdit, limitMessage, limitStatus } from '../../editor/characterLimit';
 import { readChatSelection } from '../../editor/chatSelection';
+import { splitHighlightSegments, type HighlightRange } from '../../editor/sourceHighlight';
 import { aiSessionStore } from '../../ai/sessionStore';
 import { chatRuntime } from '../../ai/chatRuntime';
 import { mapEffortForRequest } from '../../ai/effort';
@@ -48,10 +50,49 @@ export interface AIChatPanelProps {
  */
 const composerDrafts = new Map<string, string>();
 
+/**
+ * Renders a message's plain text with the ranges descendant branches came from
+ * marked. Only `valid` references are passed in: once the source message is
+ * edited (or its reference flagged stale), a mid-text mark would lie about
+ * where the branch came from. Segments come from `editor/sourceHighlight` so
+ * overlapping ranges merge instead of nesting.
+ */
+function renderMessageWithHighlights(
+  content: string,
+  ranges: readonly HighlightRange[],
+): ReactNode[] {
+  return splitHighlightSegments(content, ranges).map((segment, index) =>
+    segment.highlighted ? (
+      <mark key={index} className="ai-message__source-highlight">
+        {segment.text}
+      </mark>
+    ) : (
+      segment.text
+    ),
+  );
+}
+
 export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
   const engine = useEngine();
   const { openSettings } = useUI();
   const node = useGraphStore((state) => state.doc.nodes[nodeId]);
+  /**
+   * The full document, subscribed so message-level source highlights stay in
+   * step when a branch is created from a reply (or the reference is deleted).
+   */
+  const doc = useGraphStore((state) => state.doc);
+
+  /**
+   * Messages of this window that are the *valid* source of a descendant branch.
+   * Maps messageId → the offsets branched from. A reply can seed several
+   * branches over different phrases, so each message holds a list of ranges.
+   * Only references whose evaluation still matches the live message text
+   * highlight; stale ranges are left plain.
+   */
+  const sourceHighlights = useMemo(
+    () => (node ? collectMessageSourceRanges(doc, nodeId) : new Map<string, HighlightRange[]>()),
+    [doc, node, nodeId],
+  );
   const settings = useAISettings();
   const [draft, setDraft] = useState(() => composerDrafts.get(nodeId) ?? '');
   /** Mirrors `draft` synchronously so two fast Enter presses cannot duplicate. */
@@ -272,7 +313,7 @@ export function AIChatPanel({ nodeId }: AIChatPanelProps): ReactNode {
               {message.interrupted ? ' · stopped' : ''}
             </span>
             <div className="ai-message__content" data-chat-message-content>
-              {message.content}
+              {renderMessageWithHighlights(message.content, sourceHighlights.get(message.id) ?? [])}
             </div>
           </article>
         ))}

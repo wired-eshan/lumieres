@@ -29,6 +29,21 @@ export const palette = {
   rootAccent: '#5fd3bd',
   edge: '#333c52',
   edgeActive: '#7c8cf8',
+  /**
+   * Branch-sourcing colors. A window created from a highlighted range carries a
+   * `sourceReference`; its edge and the referenced phrase are painted in these
+   * ambers to tie the highlighted text to the edge of the branch that came from
+   * it. Contrast (WCAG): the muted `branch` is 6.7:1 on the canvas background
+   * (#0a0c11), the active variant 12.3:1 — both comfortably above the 3:1
+   * graphic threshold. `branchHighlightFill` is a translucent amber laid over
+   * the node fill; the light body text keeps ~9.6:1 on it, above the 4.5:1 text
+   * threshold, so highlighting never degrades readability.
+   */
+  branch: '#c98a2f',
+  branchActive: '#ffc34d',
+  branchHighlightFill: 'rgba(255,195,77,0.20)',
+  /** Live text selection, matching `--branch-selection` (opaque amber). */
+  branchSelectionFill: 'rgba(201,138,47,0.62)',
   danger: '#f2686b',
   warning: '#f0b35e',
   success: '#5ad19b',
@@ -36,6 +51,8 @@ export const palette = {
   selectionStroke: 'rgba(124,140,248,0.55)',
   shadow: 'rgba(0,0,0,0.45)',
   chipFill: 'rgba(124,140,248,0.10)',
+  /** Source chip fill once consigned to the branch (amber) family. */
+  branchChipFill: 'rgba(201,138,47,0.14)',
 } as const;
 
 export const fonts = {

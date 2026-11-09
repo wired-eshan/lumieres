@@ -21,7 +21,7 @@ import {
   updateNodeContent,
 } from '../graph/graphOperations';
 import { MAX_NODE_CONTENT_LENGTH, type GraphDocument, type Point } from '../graph/types';
-import { zoomTier } from './theme';
+import { zoomTier, palette } from './theme';
 import type { Camera } from './camera';
 
 interface RecordingContext {
@@ -31,6 +31,10 @@ interface RecordingContext {
   texts(): string[];
   /** Numeric arguments of every `method` call, in paint order. */
   argsOf(method: string): number[][];
+  /** Every string assigned to `fillStyle`, in paint order. */
+  fillStyles(): string[];
+  /** Every string assigned to `strokeStyle`, in paint order. */
+  strokeStyles(): string[];
 }
 
 const METHODS = new Set([
@@ -65,6 +69,8 @@ function createRecordingContext(): RecordingContext {
   const argLog = new Map<string, number[][]>();
   const texts: string[] = [];
   const state: Record<string, unknown> = {};
+  const fillStyles: string[] = [];
+  const strokeStyles: string[] = [];
 
   const ctx = new Proxy(
     {},
@@ -89,7 +95,11 @@ function createRecordingContext(): RecordingContext {
         return state[property];
       },
       set(_target, property: string | symbol, value) {
-        if (typeof property === 'string') state[property] = value;
+        if (typeof property === 'string') {
+          state[property] = value;
+          if (property === 'fillStyle' && typeof value === 'string') fillStyles.push(value);
+          if (property === 'strokeStyle' && typeof value === 'string') strokeStyles.push(value);
+        }
         return true;
       },
     },
@@ -101,6 +111,8 @@ function createRecordingContext(): RecordingContext {
     texts: () => texts,
     countOf: (method: string) => calls.filter((call) => call === method).length,
     argsOf: (method: string) => argLog.get(method) ?? [],
+    fillStyles: () => fillStyles,
+    strokeStyles: () => strokeStyles,
   };
 }
 
@@ -268,6 +280,28 @@ describe('canvas renderer', () => {
     expect(painted).toContain('enough text');
     expect(painted).toContain('source changed');
     expect(edited.nodes[childId]?.sourceReference?.selectedTextSnapshot).toBe('enough text');
+  });
+
+  it('paints the source-range highlight in the parent body only while valid', () => {
+    const { doc, rootId } = buildGraph();
+    const renderer = new GraphRenderer();
+
+    // The child was branched from "enough text" in the root body. The root window
+    // is the source, so its body must paint the amber highlight, and the branch
+    // edge must use the amber branch colour.
+    const fresh = createRecordingContext();
+    renderer.draw(fresh.ctx, frameFor(doc, { x: -200, y: -300, zoom: 1 }));
+    expect(fresh.fillStyles()).toContain(palette.branchHighlightFill);
+    expect(fresh.strokeStyles()).toContain(palette.branch);
+
+    // Editing the root text keeps the snapshot but marks the reference stale, so
+    // the in-body highlight must not be painted (the source text no longer
+    // matches the slice the branch recorded).
+    const edited = withContent(doc, rootId, 'Completely different root text now.');
+    const stale = createRecordingContext();
+    renderer.draw(stale.ctx, frameFor(edited, { x: -200, y: -300, zoom: 1 }));
+    expect(stale.texts().join(' | ')).toContain('source changed');
+    expect(stale.fillStyles()).not.toContain(palette.branchHighlightFill);
   });
 
   it('renders a collapsed window as a title-only bar', () => {

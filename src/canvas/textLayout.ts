@@ -12,6 +12,8 @@
 
 export interface WrappedText {
   lines: string[];
+  /** Character offset in the source text at which each line begins. */
+  lineStarts: number[];
   /** True when the text did not fit into `maxLines`. */
   clipped: boolean;
 }
@@ -51,45 +53,91 @@ export function wrapText(
   maxLines: number,
 ): WrappedText {
   const ctx = getMeasureContext();
-  if (!ctx) return { lines: text.split('\n').slice(0, maxLines), clipped: false };
+  if (!ctx) {
+    // Deterministic fallback for non-DOM environments (e.g. jsdom): one line per
+    // paragraph. Line starts walk the source so callers can still map ranges.
+    const paragraphs = text.split('\n');
+    const clipped = paragraphs.length > maxLines;
+    const kept = paragraphs.slice(0, maxLines);
+    const lineStarts: number[] = [];
+    let cursor = 0;
+    for (const paragraph of kept) {
+      lineStarts.push(cursor);
+      cursor += paragraph.length + 1;
+    }
+    return { lines: kept, lineStarts, clipped };
+  }
   ctx.font = font;
 
   const lines: string[] = [];
-  const paragraphs = text.split('\n');
+  const lineStarts: number[] = [];
   let clipped = false;
+
+  const paragraphs = text.split('\n');
+  // Absolute offset in `text` where the current paragraph begins. Kept in step
+  // with the emitted lines so every line can report where it starts in source.
+  let paraOffset = 0;
 
   for (let p = 0; p < paragraphs.length; p += 1) {
     const paragraph = paragraphs[p] ?? '';
+    const nextParaOffset = paraOffset + paragraph.length + 1;
     if (lines.length >= maxLines) {
       clipped = true;
       break;
     }
     if (paragraph.length === 0) {
       lines.push('');
+      lineStarts.push(paraOffset);
+      paraOffset = nextParaOffset;
       continue;
     }
 
     const words = paragraph.split(/(\s+)/).filter((token) => token.length > 0);
+    // Absolute source offset where each word begins. Words reconstruct the
+    // paragraph in order, so a running `indexOf` maps each to its position.
+    const wordStarts: number[] = [];
+    {
+      let search = 0;
+      for (const word of words) {
+        const index = paragraph.indexOf(word, search);
+        wordStarts.push(paraOffset + index);
+        search = index + word.length;
+      }
+    }
     let current = '';
-    for (const word of words) {
+    // Absolute source offset of the *first character* of the in-progress line,
+    // matching the exact string that eventually gets pushed (leading whitespace
+    // included, since a line's first character may be indentation). The first
+    // line of a paragraph begins where the paragraph does.
+    let pendingStart = paraOffset;
+
+    for (let w = 0; w < words.length; w += 1) {
+      const word = words[w] as string;
+      const wordStart = wordStarts[w] as number;
       const candidate = current + word;
       if (ctx.measureText(candidate).width <= maxWidth || current.length === 0) {
         if (current.length === 0 && ctx.measureText(word).width > maxWidth) {
           // A single token wider than the line: hard-break it by characters.
+          // Every emitted chunk starts at the source offset of its first char.
           let chunk = '';
-          for (const char of word) {
+          let chunkStart = wordStart;
+          for (let ci = 0; ci < word.length; ci += 1) {
+            const char = word[ci] as string;
             if (ctx.measureText(chunk + char).width > maxWidth && chunk.length > 0) {
               if (lines.length >= maxLines) {
                 clipped = true;
                 break;
               }
               lines.push(chunk);
+              lineStarts.push(chunkStart);
               chunk = char;
+              chunkStart = wordStart + ci;
             } else {
               chunk += char;
             }
           }
           current = chunk;
+          pendingStart = chunkStart;
           if (clipped) break;
         } else {
           current = candidate;
@@ -100,7 +148,11 @@ export function wrapText(
           break;
         }
         lines.push(current.trimEnd());
-        current = word.trimStart();
+        lineStarts.push(pendingStart);
+        const trimmed = word.trimStart();
+        current = trimmed;
+        const leading = word.length - trimmed.length;
+        pendingStart = wordStart + leading;
       }
     }
     if (clipped) break;
@@ -110,14 +162,52 @@ export function wrapText(
         break;
       }
       lines.push(current.trimEnd());
+      lineStarts.push(pendingStart);
     }
+    paraOffset = nextParaOffset;
   }
 
   if (lines.length > maxLines) {
     lines.length = maxLines;
+    lineStarts.length = maxLines;
     clipped = true;
   }
-  return { lines, clipped };
+  return { lines, lineStarts, clipped };
+}
+
+/**
+ * Maps a `[start, end)` range of the source text onto the wrapped lines,
+ * returning the character offsets *within each line's rendered string* that are
+ * covered by the range. This lets the renderer paint a highlight that aligns
+ * exactly with the glyphs it draws.
+ *
+ * Returns an array of `{ line, from, to }` covering the range in order; empty
+ * when the range is absent, inverted, or falls wholly beyond the wrapped text.
+ * A line's `from` is clamped so it never exceeds the line string's length, and
+ * only ranges that have begun before the text was clipped are reported.
+ */
+export function rangeToLineSpans(
+  layout: WrappedText,
+  start: number,
+  end: number,
+): Array<{ line: number; from: number; to: number }> {
+  const spans: Array<{ line: number; from: number; to: number }> = [];
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return spans;
+
+  for (let i = 0; i < layout.lines.length; i += 1) {
+    const line = layout.lines[i];
+    const lineStart = layout.lineStarts[i] ?? 0;
+    if (line === undefined) continue;
+    const lineLen = line.length;
+    if (lineLen === 0) continue;
+    const lineEnd = lineStart + lineLen;
+    if (end <= lineStart) break; // range is entirely before this line
+    if (start > lineEnd) continue; // range is entirely after this line
+    const from = Math.max(0, Math.min(start, lineEnd) - lineStart);
+    const to = Math.max(0, Math.min(end, lineEnd) - lineStart);
+    if (to > from) spans.push({ line: i, from: Math.min(from, lineLen), to: Math.min(to, lineLen) });
+  }
+  return spans;
 }
 
 /** Truncates a single line with an ellipsis so it fits `maxWidth`. */

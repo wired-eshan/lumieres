@@ -146,7 +146,9 @@
   padding: 7px 14px 6px;
 }
 
-/* Source reference chip — the text this branch came from. */
+/* Source reference chip — the text this branch came from. It uses the branch
+   (amber) family so the referenced phrase and the edge of the branch that came
+   from it read as one colour-coded object. */
 .note-window__source {
   position: relative;
   display: flex;
@@ -157,7 +159,7 @@
   margin-bottom: 8px;
   padding: 0 8px 0 9px;
   border-radius: 6px;
-  background: var(--accent-soft);
+  background: var(--branch-soft);
   color: var(--text-muted);
   font-size: 11px;
   font-weight: 500;
@@ -172,7 +174,7 @@
   bottom: 6px;
   width: 3px;
   border-radius: 2px;
-  background: var(--accent);
+  background: var(--branch-strong);
 }
 
 .note-window__source.is-stale::before {
@@ -225,6 +227,19 @@
 
 .note-window__body:focus {
   outline: none;
+}
+
+/* Selecting text in a note is the first half of the branch gesture, so the
+   browser's own selection is painted in the branch (amber) family rather than
+   the default blue. The persistent mark left on text a branch *was* created
+   from uses the same family, which ties the gesture, the highlighted phrase and
+   the child window's edge together. `--branch-selection` is opaque enough to
+   read as a selection on the dark body while keeping the light text legible
+   (>4.5:1); the 1px text-shadow keeps it readable over the amber wash. */
+.note-window__body::selection {
+  background: var(--branch-selection);
+  color: #fff7e6;
+  text-shadow: 0 0 1px rgba(10, 12, 17, 0.45);
 }
 
 .note-window__body::-webkit-scrollbar {
@@ -374,6 +389,27 @@
   line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: break-word;
+}
+
+/* Text in a reply that a descendant branch was created from. Uses the branch
+   (amber) family so it pairs with the edge of the branch it produced; the
+   light body text keeps >4.5:1 contrast on the translucent amber. */
+.ai-message__source-highlight {
+  background: var(--branch-highlight);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 1px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* Selecting reply text is how an AI window is branched, so its selection is
+   painted in the same amber family as the note editor's and the branch edge. */
+.ai-message__content::selection,
+.ai-message__content ::selection {
+  background: var(--branch-selection);
+  color: #fff7e6;
+  text-shadow: 0 0 1px rgba(10, 12, 17, 0.45);
 }
 
 .ai-message.is-user .ai-message__content {

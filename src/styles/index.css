@@ -26,6 +26,18 @@
   --accent-soft: rgba(124, 140, 248, 0.14);
   --accent-ai: #b79cff;
   --accent-teal: #5fd3bd;
+  /* Branch-sourcing accent: the phrase a window was branched from, and the edge
+     of that branch, share this amber family. WCAG: branch 6.7:1 on the canvas
+     background, branch-strong 12.3:1, and the translucent highlight keeps body
+     text above 4.5:1. Mirrors `palette` in src/canvas/theme.ts. */
+  --branch: #c98a2f;
+  --branch-strong: #ffc34d;
+  --branch-soft: rgba(201, 138, 47, 0.14);
+  --branch-highlight: rgba(255, 195, 77, 0.20);
+  /* Opaque amber for a *live* text selection (`::selection`), because a
+     translucent wash is invisible behind the browser's own selection paint.
+     Chosen so light body text still clears 4.5:1 on it. */
+  --branch-selection: rgba(201, 138, 47, 0.62);
   --danger: #f2686b;
   --warning: #f0b35e;
   --success: #5ad19b;

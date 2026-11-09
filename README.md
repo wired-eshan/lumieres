@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run deploy` | Build and deploy to Cloudflare |
 | `npm run deploy:dry-run` | Build and validate the upload without deploying |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
-| `npm test` | Vitest (421 tests) |
+| `npm test` | Vitest (458 tests) |
 
 Requires Node 20+ for development and Node 22+ for the Wrangler deployment
 scripts. The app is fully client-side; there is no backend to run.
@@ -321,6 +321,33 @@ Two invariants keep that native behaviour intact, because both were easy to brea
   copy can be dropped by a caret the browser placed on its own — a delayed focus
   frame, a value the editor rewrote — which used to make "Create branch" look
   inert on a perfectly good selection.
+
+#### One colour for the whole branch gesture
+
+Branching is colour-coded end to end in an amber family, kept in step between
+`src/canvas/theme.ts` and the CSS custom properties in `src/styles/index.css`:
+
+| Where | Token | What it marks |
+| --- | --- | --- |
+| Live text selection in a note or reply | `--branch-selection` | The phrase being considered for branching |
+| *Create branch* button and its preview | `--branch-strong` / `--branch` | The action that consumes that selection |
+| Phrase in the parent note body / AI reply | `--branch-highlight` | Where an existing branch came from |
+| Child's source chip | `--branch-soft` / `--branch-strong` | The snapshot the child carries |
+| Parent → child edge | `palette.branch` (active: `branchActive`) | The relationship the branch created |
+
+The live selection is amber rather than the browser's default blue because
+selecting text *is* the first half of the branch gesture: the highlight, the
+button, the persisted mark and the edge then read as one action. The persistent
+in-body mark and the reply mark are painted only while the source reference
+still evaluates as `valid`; a stale reference keeps its snapshot in the child's
+chip (also amber) and is labelled *source changed*, so a mark is never painted
+over words that no longer match.
+
+The ranges come from one pure query, `graph/sourceHighlights.ts`, shared by the
+canvas renderer and the chat panel — a mismatch between those two would paint a
+highlight over the wrong words. Ranges are collected from references whose
+`sourceNodeId` is the window being drawn, so a reparented window keeps its old
+reference without leaking offsets onto its new parent.
 
 ### AI windows: document for history, runtime for tokens
 
