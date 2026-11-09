@@ -39,6 +39,7 @@ import {
 } from './chatService';
 import { ContinuationStore } from './continuationStore';
 import { describeError } from './errors';
+import { lineageSummarizer, type LineageSummarizer } from './summarizer';
 import { validateProviderConfig, type ResolvedProviderConfig } from './provider';
 import { aiSessionStore, type AISessionStore } from './sessionStore';
 import { getAISettings, resolveAISettings, type AISettings } from './settings';
@@ -69,6 +70,8 @@ interface StreamState {
   config: ResolvedProviderConfig;
   /** Full normalized history this response will cover, for continuation. */
   history: ChatTurn[];
+  /** The user's latest message, used to prioritise relevant ancestor context. */
+  query: string;
   /** True when this request is riding a provider continuation id. */
   usedContinuation: boolean;
   text: string;
@@ -90,6 +93,12 @@ export interface ChatRuntimeDeps {
   stream: (input: StreamChatInput) => Promise<StreamChatResult>;
   /** In-memory provider-continuation ids; separate from the document. */
   continuations?: ContinuationStore;
+  /**
+   * Fire-and-forget lineage-summary warmer. When present it is called (never
+   * awaited) after a send so the *next* clarify request can carry an abstractive
+   * summary. Defaults to the app-wide `lineageSummarizer`.
+   */
+  summarizer?: LineageSummarizer;
   now: () => number;
   newId: (prefix: string) => string;
   /** Override the global request cap (tests, or a future settings surface). */
@@ -193,7 +202,10 @@ export class ChatRuntime {
 
     const current = this.deps.controller.getDocument();
     const history = selectConversationHistory(current.nodes[nodeId]?.chat ?? []);
-    return this.start(nodeId, history, config);
+    // Warm the ancestor summary for the next request; never awaited, so an
+    // interactive send stays instant whether or not a key is configured.
+    (this.deps.summarizer ?? lineageSummarizer).warm(nodeId, current, text);
+    return this.start(nodeId, history, config, text);
   }
 
   /** Re-sends the latest user turn without appending a duplicate. */
@@ -238,7 +250,10 @@ export class ChatRuntime {
       };
     }
     const history = selectConversationHistory(node.chat.slice(0, lastUserIndex + 1));
-    return this.start(nodeId, history, config);
+    const retryQuery = node.chat[lastUserIndex]?.content ?? '';
+    const current = this.deps.controller.getDocument();
+    (this.deps.summarizer ?? lineageSummarizer).warm(nodeId, current, retryQuery);
+    return this.start(nodeId, history, config, retryQuery);
   }
 
   /** Stops this node's request and keeps any partial response. */
@@ -269,6 +284,7 @@ export class ChatRuntime {
     nodeId: NodeId,
     history: ChatTurn[],
     config: ResolvedProviderConfig,
+    query: string,
   ): ChatSendOutcome {
     if (history.length === 0) {
       return { ok: false, code: 'EMPTY', message: 'Type a message first.' };
@@ -305,6 +321,7 @@ export class ChatRuntime {
       controller,
       config,
       history: history.map((turn) => ({ role: turn.role, content: turn.content })),
+      query,
       usedContinuation,
       text: '',
       pending: '',
@@ -316,7 +333,7 @@ export class ChatRuntime {
     this.deps.sessions.beginRequest(nodeId, requestId);
 
     const doc = this.deps.controller.getDocument();
-    const system = buildChatSystemPrompt(doc, nodeId);
+    const system = buildChatSystemPrompt(doc, nodeId, { query });
 
     void this.execute(state, {
       config,

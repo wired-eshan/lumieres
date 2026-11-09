@@ -87,6 +87,36 @@ describe('chat system prompt', () => {
     expect(prompt).toContain('plain text');
   });
 
+  it('grounds a clarify request in the original problem/source concept', () => {
+    let doc = createEmptyDocument('Two sum');
+    const root = doc.rootNodeId;
+    doc = setContent(doc, root, 'Find two numbers that add up to a target.');
+
+    const child = createBranch(doc, {
+      parentId: root,
+      position: { x: 500, y: 0 },
+      kind: 'ai',
+    });
+    if (!child.ok) throw new Error(child.message);
+    doc = child.value.doc;
+
+    // A deepen-branch clarify request must surface the original problem anchor
+    // and the re-grounding instruction…
+    const clarify = buildChatSystemPrompt(doc, child.value.node.id, {
+      query: 'can you explain this more clearly?',
+    });
+    expect(clarify).toContain('Original problem / source concept');
+    expect(clarify).toContain('Find two numbers that add up to a target.');
+    expect(clarify).toContain('Ground your answer in the original problem');
+
+    // …while a normal query keeps the grounding instruction out.
+    const normal = buildChatSystemPrompt(doc, child.value.node.id, {
+      query: 'give me an example',
+    });
+    expect(normal).not.toContain('Ground your answer in the original problem');
+    expect(normal).toContain('Original problem / source concept');
+  });
+
   it('never concatenates another window\'s conversation', () => {
     let doc = createEmptyDocument('Isolation');
     const root = doc.rootNodeId;

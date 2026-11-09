@@ -100,10 +100,41 @@ export interface AINodeContext {
     stale: boolean;
   } | null;
   ancestors: AIContextAncestor[];
+  /**
+   * The root / original problem of the tree this node belongs to, always
+   * preserved even for deep nodes whose full IP would otherwise exceed
+   * `maxAncestors`. `null` when the node has no ancestors.
+   */
+  rootAncestor: AIContextAncestor | null;
+  /**
+   * Deterministic lexical relevance score of each ancestor against the current
+   * `query` (higher = more relevant). `null` when no query was supplied.
+   */
+  ancestorRelevance: Map<NodeId, number> | null;
+  /**
+   * Whether the current query reads like a clarify/explanation request
+   * ("explain this more clearly", "why", "again"...). Drives ancestor/root
+   * budget bias and a grounding instruction in the system prompt.
+   */
+  intent: 'clarify' | 'normal';
   /** Free-form context the user attached to this node. */
   userContext: string[];
   history: AIMessage[];
   budget: AIContextBudget;
+  /**
+   * A cached, model-generated condensation of the node's lineage
+   * (root → relevant ancestors → current), when a fresh entry exists. When set,
+   * the prompt builder renders it as the carrying context instead of the raw
+   * root/ancestor excerpts. Absent when no provider key is configured, nothing
+   * is cached yet, or no lineage exists.
+   */
+  lineageSummary?: string;
+  /**
+   * True when a lineage exists but no fresh lineage summary is cached yet — the
+   * signal the fire-and-forget warm path uses to build one for the next request.
+   * Never true when `lineageSummary` is set.
+   */
+  lineageSummaryNeeded?: boolean;
 }
 
 /** Character budget defaults; values are owned by `src/config.ts`. */
@@ -135,6 +166,31 @@ export interface AskResult {
   nodeId: NodeId;
   content: string;
   usage?: { inputTokens: number; outputTokens: number };
+}
+
+/**
+ * Input for an ancestor-context **lineage summary**: a single condensed,
+ * coherent narrative of root → relevant ancestors → current, so a deep branch
+ * can ask "explain this more clearly" against the gist rather than a clipped
+ * raw prefix. Consumed by the key-gated summarizer (`ai/summarizer.ts`) and
+ * reserved on the `AIService` seam.
+ */
+export interface SummarizeInput {
+  requestId: AIRequestId;
+  /** The original problem / source concept anchor of the tree. */
+  rootId: NodeId;
+  /** The relevant ancestors to carry, root included (nearest irrelevant ones skipped). */
+  nodeIds: NodeId[];
+  /** The user's latest message; steers relevance and wording. */
+  query: string;
+  /** Soft target for the combined summary length. */
+  targetCharacters: number;
+}
+
+export interface SummarizeResult {
+  requestId: AIRequestId;
+  nodeIds: NodeId[];
+  summary: string;
 }
 
 export type AIStreamEvent =

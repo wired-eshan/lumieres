@@ -68,6 +68,20 @@ export const CONFIG = {
       maxCharacters: 24_000,
       maxMessages: 80,
     },
+    /**
+     * Ancestor-context summarization (hybrid): a deterministic extractive
+     * summarizer is always used; when a provider key is configured and a fresh
+     * cache entry exists, an abstractive LLM "lineage summary" (root → current)
+     * replaces the raw excerpts. These knobs bound the cache and background jobs.
+     */
+    summarize: {
+      /** Soft target total length of a lineage summary. */
+      targetCharacters: 1_200,
+      /** Dedicated background summary jobs; separate from the chat concurrency cap. */
+      maxConcurrent: 1,
+      /** In-memory LRU summaries kept. */
+      maxCacheEntries: 64,
+    },
   },
 } as const;
 

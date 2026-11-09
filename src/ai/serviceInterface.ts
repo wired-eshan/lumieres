@@ -18,7 +18,15 @@
  */
 
 import { CONFIG } from '../config';
-import type { AIStreamEvent, AIRequestId, AskInput, AskResult, AutocompleteInput } from './types';
+import type {
+  AIStreamEvent,
+  AIRequestId,
+  AskInput,
+  AskResult,
+  AutocompleteInput,
+  SummarizeInput,
+  SummarizeResult,
+} from './types';
 import type { ProviderId } from './provider';
 import type { NodeId } from '../graph/types';
 
@@ -27,6 +35,13 @@ export interface AIService {
   autocomplete(input: AutocompleteInput): AsyncIterable<string>;
   /** One-shot question answering for a single node. */
   ask(input: AskInput): Promise<AskResult>;
+  /**
+   * Condenses a node's lineage into one cached, coherent summary. Reserved for a
+   * registry-backed implementation; the working key-gated path lives directly in
+   * `ai/summarizer.ts` (mirroring chat, which also bypasses this registry). Optional
+   * so services that predate summarization remain valid. Never faked.
+   */
+  summarize?(input: SummarizeInput): Promise<SummarizeResult>;
   /** Cancels only the given node's request; other nodes are unaffected. */
   cancel(nodeId: NodeId, requestId: AIRequestId): void;
   /** Optional lower-level stream, if a provider prefers a single code path. */
