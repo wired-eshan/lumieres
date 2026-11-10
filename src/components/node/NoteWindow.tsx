@@ -25,6 +25,7 @@ import {
 import { useController, useEngine } from '../../app/EngineContext';
 import { useGraphStore } from '../../graph/graphStore';
 import { evaluateSourceReference } from '../../graph/graphOperations';
+import { displayTitle } from '../../graph/displayTitle';
 import {
   MAX_NODE_HEIGHT,
   MAX_NODE_WIDTH,
@@ -215,6 +216,10 @@ export function NoteWindow({ nodeId }: NoteWindowProps): ReactNode {
   const isAi = node.kind === 'ai';
   const status = limitStatus(node.content);
   const message = limitMessage(status);
+  // What the window *reads* as, which may be derived when the stored title is
+  // empty. The input itself stays bound to the stored title: typing there is how
+  // the user takes ownership of the label.
+  const shownTitle = displayTitle(node);
 
   return (
     <div
@@ -223,7 +228,7 @@ export function NoteWindow({ nodeId }: NoteWindowProps): ReactNode {
       ref={rootRef}
       style={{ width: node.size.width, height: node.size.height }}
       role="group"
-      aria-label={`${isAi ? 'AI conversation' : 'Note'}: ${node.title || 'untitled'}`}
+      aria-label={`${isAi ? 'AI conversation' : 'Note'}: ${shownTitle || 'untitled'}`}
     >
       <header className="note-window__header" style={{ height: NODE_HEADER_HEIGHT }}>
         <span className={`note-window__accent${node.id === doc.rootNodeId ? ' is-root' : ''}`} />
@@ -253,7 +258,10 @@ export function NoteWindow({ nodeId }: NoteWindowProps): ReactNode {
           className="note-window__title"
           value={title}
           onChange={handleTitleChange}
-          placeholder={isAi ? 'Untitled conversation' : 'Untitled note'}
+          placeholder={
+            shownTitle ||
+            (isAi ? 'Untitled conversation' : 'Untitled note')
+          }
           aria-label={isAi ? 'Conversation title' : 'Note title'}
           spellCheck={false}
         />

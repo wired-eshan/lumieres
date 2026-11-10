@@ -29,12 +29,16 @@ interface RecordingContext {
   calls: string[];
   countOf(method: string): number;
   texts(): string[];
+  /** Every `fillText` with its x/y, in paint order. */
+  textDraws(): Array<{ text: string; x: number; y: number }>;
   /** Numeric arguments of every `method` call, in paint order. */
   argsOf(method: string): number[][];
   /** Every string assigned to `fillStyle`, in paint order. */
   fillStyles(): string[];
   /** Every string assigned to `strokeStyle`, in paint order. */
   strokeStyles(): string[];
+  /** Every string assigned to `font`, in paint order. */
+  fonts(): string[];
 }
 
 const METHODS = new Set([
@@ -68,9 +72,11 @@ function createRecordingContext(): RecordingContext {
   const calls: string[] = [];
   const argLog = new Map<string, number[][]>();
   const texts: string[] = [];
+  const textDraws: Array<{ text: string; x: number; y: number }> = [];
   const state: Record<string, unknown> = {};
   const fillStyles: string[] = [];
   const strokeStyles: string[] = [];
+  const fontStrings: string[] = [];
 
   const ctx = new Proxy(
     {},
@@ -88,7 +94,14 @@ function createRecordingContext(): RecordingContext {
               log.push(args as number[]);
               argLog.set(property, log);
             }
-            if (property === 'fillText' && typeof args[0] === 'string') texts.push(args[0]);
+            if (property === 'fillText' && typeof args[0] === 'string') {
+              texts.push(args[0]);
+              textDraws.push({
+                text: args[0],
+                x: Number(args[1]),
+                y: Number(args[2]),
+              });
+            }
             return undefined;
           };
         }
@@ -99,6 +112,7 @@ function createRecordingContext(): RecordingContext {
           state[property] = value;
           if (property === 'fillStyle' && typeof value === 'string') fillStyles.push(value);
           if (property === 'strokeStyle' && typeof value === 'string') strokeStyles.push(value);
+          if (property === 'font' && typeof value === 'string') fontStrings.push(value);
         }
         return true;
       },
@@ -109,10 +123,12 @@ function createRecordingContext(): RecordingContext {
     ctx,
     calls,
     texts: () => texts,
+    textDraws: () => textDraws,
     countOf: (method: string) => calls.filter((call) => call === method).length,
     argsOf: (method: string) => argLog.get(method) ?? [],
     fillStyles: () => fillStyles,
     strokeStyles: () => strokeStyles,
+    fonts: () => fontStrings,
   };
 }
 
@@ -361,8 +377,7 @@ describe('canvas renderer', () => {
     expect(painted).toContain('1 message');
   });
 
-  it('draws a resized window without throwing', () => {
-    const { doc, rootId } = buildGraph();
+  it('draws a resized window without throwing', () => {    const { doc, rootId } = buildGraph();
     const resized: GraphDocument = {
       ...doc,
       nodes: {
@@ -379,20 +394,87 @@ describe('canvas renderer', () => {
     expect(recording.texts().join(' | ')).toContain('Root');
   });
 
-  it('switches to simplified rendering when zoomed far out', () => {
+  it('labels windows at low zoom instead of painting skeleton blocks', () => {
     const { doc } = buildGraph();
     const renderer = new GraphRenderer();
 
     const detailed = createRecordingContext();
     renderer.draw(detailed.ctx, frameFor(doc, { x: -200, y: -300, zoom: 1 }));
 
-    const simplified = createRecordingContext();
-    renderer.draw(simplified.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.text / 2 }));
+    // Below the text tier but above the title tier: a readable title plus a
+    // short body preview — still text, never the old placeholder bars.
+    const preview = createRecordingContext();
+    renderer.draw(preview.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.title + 0.1 }));
 
-    // No text at low zoom — windows become blocks.
-    expect(simplified.countOf('fillText')).toBe(0);
+    // Below the title tier: the title alone, in screen space.
+    const titleOnly = createRecordingContext();
+    renderer.draw(titleOnly.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.structure + 0.05 }));
+
     expect(detailed.countOf('fillText')).toBeGreaterThan(0);
-    expect(simplified.countOf('fillRect')).toBeGreaterThan(0);
+    expect(preview.countOf('fillText')).toBeGreaterThan(0);
+    expect(titleOnly.countOf('fillText')).toBeGreaterThan(0);
+    // Every tier still paints the window block itself.
+    expect(titleOnly.countOf('fillRect')).toBeGreaterThan(0);
+    // The title is what makes a zoomed-out window identifiable. It is clipped
+    // to the window's screen width (the recording context reports 7px/char),
+    // so assert on the prefix rather than the full string.
+    expect(titleOnly.texts().join(' | ')).toContain('Root no');
+  });
+
+  it('skips labels for windows too small to read, and still paints the block', () => {
+    const { doc } = buildGraph();
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+
+    // 340 world units wide at 0.05 zoom is 17 screen pixels — narrower than the
+    // readable threshold, so the label is dropped but the block is drawn.
+    renderer.draw(recording.ctx, frameFor(doc, { x: -200, y: -300, zoom: 0.05 }));
+
+    expect(recording.countOf('fillText')).toBe(0);
+    expect(recording.countOf('fillRect')).toBeGreaterThan(0);
+  });
+
+  it('paints a title plus body preview in the middle tier, not footer chrome', () => {
+    const { doc } = buildGraph();
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+    renderer.draw(recording.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.title + 0.05 }));
+
+    const painted = recording.texts().join(' | ');
+    expect(painted).toContain('Root note with enough text');
+    // The footer count belongs to the full-text tier; drawing it in a scaled
+    // world transform would make it a smudge, so this tier omits it.
+    expect(painted).not.toContain('/ 20,000');
+    // Still no skeleton bars: every `fillRect` here is chrome, and the body is
+    // real glyphs.
+    expect(recording.countOf('fillText')).toBeGreaterThan(0);
+  });
+
+  it('uses a screen-sized font for the low-zoom title', () => {
+    const { doc } = buildGraph();
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+    renderer.draw(recording.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.structure + 0.05 }));
+
+    // `canvasFont(600, 10)` — a fixed screen size, not a world size scaled by
+    // the camera (which would render a 1.4 px smudge at 0.19 zoom).
+    expect(recording.fonts()).toContain(
+      '600 10px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    );
+  });
+
+  it('keeps the title anchored to the header across the text-tier boundary', () => {
+    const { doc } = buildGraph();
+    const renderer = new GraphRenderer();
+
+    const label = createRecordingContext();
+    renderer.draw(label.ctx, frameFor(doc, { x: -200, y: -300, zoom: zoomTier.text - 0.02 }));
+
+    // The low-zoom label iterates windows in paint order; take the root's title.
+    const rootTitle = label.textDraws().find((draw) => draw.text.startsWith('Root'));
+    expect(rootTitle).toBeDefined();
+    // Anchored near the top of the window (the header), not floating mid-body.
+    expect(rootTitle?.y).toBeLessThan(30);
   });
 
   it('renders only the topology at extreme zoom-out', () => {
@@ -404,6 +486,32 @@ describe('canvas renderer', () => {
     expect(recording.countOf('fillText')).toBe(0);
     // No bezier edges at this tier: individual windows are sub-pixel.
     expect(recording.countOf('bezierCurveTo')).toBe(0);
+  });
+
+  it('culls the structural overview with the spatial index, not the whole document', () => {
+    // The overview tier used to iterate every node in the document and rect-test
+    // each one — O(total) per frame at exactly the zoom used to navigate a big
+    // canvas. It must now paint only what the cull set contains.
+    const { doc } = buildGraph();
+    const wide: GraphDocument = {
+      ...doc,
+      nodes: {
+        ...doc.nodes,
+        offscreen: {
+          ...doc.nodes[doc.rootNodeId]!,
+          id: 'offscreen',
+          parentId: doc.rootNodeId,
+          position: { x: 90_000, y: 90_000 },
+        },
+      },
+    };
+
+    const renderer = new GraphRenderer();
+    const recording = createRecordingContext();
+    renderer.draw(recording.ctx, frameFor(wide, { x: -200, y: -300, zoom: zoomTier.structure / 2 }));
+
+    expect(renderer.stats.drawnNodes).toBeLessThan(Object.keys(wide.nodes).length);
+    expect(recording.countOf('fillRect')).toBeGreaterThan(0);
   });
 
   it('culls windows outside the viewport', () => {

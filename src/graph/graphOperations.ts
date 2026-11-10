@@ -103,12 +103,26 @@ export function getChildren(doc: GraphDocument, id: NodeId): NoteNode[] {
   return out;
 }
 
+/**
+ * Direct-child counts per document, built once. The renderer asks for this on
+ * every visible window on every frame; scanning `doc.nodes` each time made a
+ * full-text frame O(visible × N) — roughly a second at 1,000 windows in a
+ * 5,000-node graph. Documents are immutable (each operation returns a new one),
+ * so an index keyed by document identity can never be stale.
+ */
+const childCountsByDocument = new WeakMap<GraphDocument, Map<NodeId, number>>();
+
 export function getChildCount(doc: GraphDocument, id: NodeId): number {
-  let count = 0;
-  for (const node of Object.values(doc.nodes)) {
-    if (node.parentId === id) count += 1;
+  let counts = childCountsByDocument.get(doc);
+  if (!counts) {
+    counts = new Map();
+    for (const node of Object.values(doc.nodes)) {
+      if (node.parentId === null) continue;
+      counts.set(node.parentId, (counts.get(node.parentId) ?? 0) + 1);
+    }
+    childCountsByDocument.set(doc, counts);
   }
-  return count;
+  return counts.get(id) ?? 0;
 }
 
 /** Depth-first descendant ids, excluding `id` itself. */

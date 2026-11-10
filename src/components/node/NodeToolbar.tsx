@@ -10,6 +10,7 @@
 import { useCallback, type ReactNode } from 'react';
 import { useEngine, useEngineSnapshot } from '../../app/EngineContext';
 import { useGraphStore } from '../../graph/graphStore';
+import { displayTitle } from '../../graph/displayTitle';
 import { MAX_CHILDREN_PER_NODE } from '../../config';
 import { truncate } from '../../utils/misc';
 import { BranchIcon, CollapseIcon, ExpandIcon, FitIcon, ParentIcon, TargetIcon, TrashIcon } from '../icons';
@@ -38,11 +39,10 @@ export function NodeToolbar(): ReactNode {
 
   const childCount = Object.values(doc.nodes).filter((candidate) => candidate.parentId === node.id).length;
   const atLimit = childCount >= MAX_CHILDREN_PER_NODE;
-  const lastChat = node.chat[node.chat.length - 1]?.content ?? '';
+  // A derived label (first chat turn, else extractive from the body) means a
+  // window with no stored title is still identifiable in the toolbar.
   const label =
-    node.title.trim() ||
-    truncate(node.content.trim(), 32) ||
-    (node.kind === 'ai' ? truncate(lastChat, 32) || 'AI conversation' : 'Untitled note');
+    displayTitle(node) || (node.kind === 'ai' ? 'AI conversation' : 'Untitled note');
   const editLabel = node.kind === 'ai' ? 'Open this AI conversation' : 'Edit this note';
 
   return (

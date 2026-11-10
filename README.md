@@ -25,7 +25,7 @@ npm run dev        # http://localhost:5173
 | `npm run deploy` | Build and deploy to Cloudflare |
 | `npm run deploy:dry-run` | Build and validate the upload without deploying |
 | `npm run typecheck` | `tsc --noEmit`, strict, no `any` |
-| `npm test` | Vitest (458 tests) |
+| `npm test` | Vitest (486 tests) |
 
 Requires Node 20+ for development and Node 22+ for the Wrangler deployment
 scripts. The app is fully client-side; there is no backend to run.
@@ -270,10 +270,21 @@ pointer-up.
   (or its in-flight resize draft), so culling, edges, hit testing, minimap,
   fit-to-view and placement all follow a resized frame without a global layout
   pass.
-- **Level of detail** — full text above 0.42 zoom, placeholder blocks below it,
-  topology-only outlines below 0.14. Text is never drawn at a size where it would
-  be an unreadable smudge. AI windows preview their conversation tail instead of
-  the note body, with long turns truncated before layout.
+- **Level of detail** — four tiers. Above 0.42 zoom windows paint full text.
+  From 0.25 to 0.42 they paint the title plus up to two preview lines (the note
+  body, or an AI window's latest reply). From 0.14 to 0.25 they paint the title
+  alone, drawn in *screen* space so it stays a readable 10–13 px regardless of
+  the zoom, clipped to the window's on-screen rect, and skipped entirely for
+  windows too small to hold a label. Below 0.14 only topology outlines remain.
+  Window titles therefore stay identifiable while navigating a large graph
+  instead of degrading into anonymous blocks.
+- **Derived titles** — a window with no stored title is labelled from its first
+  user chat turn, else from the leading lines of its note body (first
+  heading-like line → first sentence → salient words). This is display-only:
+  the stored `title` is never rewritten, no document write or undo step is
+  produced, and the result is memoised on the immutable node object. The same
+  `displayTitle` feeds the canvas at every tier, the window header and the
+  toolbar, so they cannot disagree.
 - **Cached text layout** — wrapping is measured once per note and invalidated by
   content, width or font. Panning and zooming never measure text.
 - **Dirty-flag rendering** — `requestAnimationFrame` runs only while something is
@@ -541,10 +552,12 @@ current model; a persistent map would remove it if it ever matters.
 
 ## Testing and measured performance
 
-419 tests across domain, canvas, editor, persistence, AI, settings and
+486 tests across domain, canvas, editor, persistence, AI, settings and
 integration layers:
 
 ```
+displayTitle      heading/sentence/salient extraction, first-chat-turn titles,
+                  length and inspection caps, precedence, memoisation
 graphOperations   root creation, branching at any depth, 50-child limit (per node),
                   character limit, deletion semantics, source-reference staleness,
                   integrity after hundreds of branches
@@ -609,12 +622,22 @@ below are the per-frame costs the renderer pays, printed by
 | Marquee query | **0.1 ms** |
 | Cached text-layout lookup, 400 notes | **< 0.1 ms** |
 | Single-node content update at 5,000 nodes | **0.7 ms** |
+| Title + preview frame, 5,000 nodes @ 0.3 zoom (2,371 drawn) | 26 ms total · **0.011 ms per drawn window** |
+| Full-text frame, 5,000 nodes @ 0.5 zoom (1,108 drawn) | 40 ms total · **0.036 ms per drawn window** |
 | Build a 5,000-node graph (bulk path) | 0.3–0.7 s |
 | Validate a 5,000-node graph | 77 ms |
 
 Culling at 0.2 ms leaves the whole 16.7 ms frame budget for painting, and the
 React tree does not grow with the graph, so the rendering architecture has ample
 headroom at 5,000 nodes.
+
+Frame cost scales with *drawn windows*, not document size. Two per-window
+lookups that used to walk the whole document — child counts for the branch
+footer, and descendant source-range collection — are now indexed per document
+version (a `WeakMap` keyed by the immutable document, so no invalidation is
+needed). At 1,108 drawn full-text windows on the 5,000-node graph that took a
+frame from ~842 ms to ~40 ms in jsdom; the test bounds cost per drawn window so
+an accidental O(N) scan per window fails it again.
 
 **What has not been verified:** frame rate, paint cost and memory in a real
 browser. There is no browser automation in this environment, so smoothness of

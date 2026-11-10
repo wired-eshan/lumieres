@@ -269,3 +269,45 @@ export class TextLayoutCache {
 
 /** Module-level cache shared by the renderer (and resettable in tests). */
 export const textLayoutCache = new TextLayoutCache();
+
+/**
+ * Memoised `ellipsize` for the low-zoom title labels.
+ *
+ * Unlike body text, the title of an off-screen-tier window is measured against
+ * a *screen-space* width — which changes on every wheel tick but stays constant
+ * while panning or dragging, when the label is still painted every frame. A
+ * small LRU keyed by (text, font, rounded width) keeps that path measure-free
+ * without touching the per-node body cache.
+ *
+ * Bounded deliberately: the key space is every visible title at every integer
+ * zoom step, which is tiny, and an unbounded map on an adversarial graph would
+ * be a leak.
+ */
+const TITLE_LABEL_CACHE_LIMIT = 512;
+const titleLabelCache = new Map<string, string>();
+
+export function ellipsizeCached(text: string, font: string, maxWidth: number): string {
+  // Half-pixel buckets: the same quantisation the layout cache uses, so a
+  // fractional pan offset cannot create a key per frame.
+  const width = Math.max(1, Math.round(maxWidth * 2) / 2);
+  const key = `${font}\u0000${width}\u0000${text}`;
+  const hit = titleLabelCache.get(key);
+  if (hit !== undefined) {
+    // Refresh recency: Map preserves insertion order, so re-inserting is an LRU touch.
+    titleLabelCache.delete(key);
+    titleLabelCache.set(key, hit);
+    return hit;
+  }
+  const label = ellipsize(text, font, width);
+  titleLabelCache.set(key, label);
+  if (titleLabelCache.size > TITLE_LABEL_CACHE_LIMIT) {
+    const oldest = titleLabelCache.keys().next();
+    if (!oldest.done) titleLabelCache.delete(oldest.value);
+  }
+  return label;
+}
+
+/** Test hook: drops every memoised title label. */
+export function clearTitleLabelCache(): void {
+  titleLabelCache.clear();
+}

@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { rangeToLineSpans, wrapText } from './textLayout';
+import { clearTitleLabelCache, ellipsize, ellipsizeCached, rangeToLineSpans, wrapText } from './textLayout';
 
 describe('wrapText line starts', () => {
   it('tracks each line to its source offset across paragraphs and line breaks', () => {
@@ -60,5 +60,39 @@ describe('rangeToLineSpans', () => {
 
   it('ignores a range that begins after the wrapped text', () => {
     expect(rangeToLineSpans(layout, 99, 120)).toEqual([]);
+  });
+});
+
+describe('ellipsizeCached', () => {
+  it('returns the same result as ellipsize and memoises it', () => {
+    const font = '600 10px sans-serif';
+    const direct = ellipsize('a window title that will not fit', font, 60);
+    const first = ellipsizeCached('a window title that will not fit', font, 60);
+    const second = ellipsizeCached('a window title that will not fit', font, 60);
+
+    expect(first).toBe(direct);
+    // A hit returns the cached string rather than re-measuring.
+    expect(second).toBe(first);
+  });
+
+  it('keeps distinct widths and fonts apart', () => {
+    const a = ellipsizeCached('same text here', '600 10px sans-serif', 40);
+    const b = ellipsizeCached('same text here', '600 10px sans-serif', 200);
+    const c = ellipsizeCached('same text here', '600 14px sans-serif', 40);
+
+    // Wider allowance keeps more characters; a different font is a different key.
+    expect(b.length).toBeGreaterThanOrEqual(a.length);
+    expect(c).toBe(ellipsize('same text here', '600 14px sans-serif', 40));
+  });
+
+  it('evicts the oldest entry past the cache limit instead of growing forever', () => {
+    clearTitleLabelCache();
+    // 600 distinct inputs against a 512-entry bound.
+    for (let i = 0; i < 600; i += 1) {
+      ellipsizeCached(`title ${i}`, '600 10px sans-serif', 100);
+    }
+    // Recomputing an evicted entry still yields the correct label; the bound is
+    // about memory, not correctness.
+    expect(ellipsizeCached('title 0', '600 10px sans-serif', 100)).toBe('title 0');
   });
 });

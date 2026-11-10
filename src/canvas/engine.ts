@@ -312,6 +312,9 @@ export class CanvasEngine {
         this.draftPositions.delete(id);
         this.draftSizes.delete(id);
         textLayoutCache.invalidate(`node:${id}`);
+        // The low-zoom preview tier caches two wrapped lines per node under a
+        // second key; without this a deleted node's preview entry leaked.
+        textLayoutCache.invalidate(`preview:${id}`);
       }
       for (const id of [...change.added, ...change.ids]) {
         const node = doc.nodes[id];

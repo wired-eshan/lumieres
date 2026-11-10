@@ -36,6 +36,11 @@ export const CONFIG = {
     textLodZoom: 0.42,
     /** Below this zoom, shadows and inner detail are skipped. */
     detailLodZoom: 0.25,
+    /**
+     * Below this zoom, windows are labelled with their title only (drawn at a
+     * screen-space floor so it stays readable), instead of full body text.
+     */
+    titleLodZoom: 0.25,
     /** Below this zoom, only edges and window outlines are painted. */
     structureLodZoom: 0.14,
     /** Below this zoom the HTML editor overlay is closed. */
@@ -108,6 +113,7 @@ export const MIN_ZOOM = CONFIG.canvas.minZoom;
 export const MAX_ZOOM = CONFIG.canvas.maxZoom;
 export const TEXT_LOD_ZOOM = CONFIG.canvas.textLodZoom;
 export const DETAIL_LOD_ZOOM = CONFIG.canvas.detailLodZoom;
+export const TITLE_LOD_ZOOM = CONFIG.canvas.titleLodZoom;
 export const STRUCTURE_LOD_ZOOM = CONFIG.canvas.structureLodZoom;
 export const MIN_EDIT_ZOOM = CONFIG.canvas.minEditZoom;
 

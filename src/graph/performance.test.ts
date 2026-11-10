@@ -17,12 +17,13 @@ import { createStressGraph } from '../utils/stressGraph';
 import { validateGraph } from './graphValidation';
 import { getChildCount, getNode, updateNodeContent } from './graphOperations';
 import { SpatialGrid } from '../canvas/spatialIndex';
-import { nodeRectAt } from '../canvas/renderer';
+import { GraphRenderer, nodeRectAt } from '../canvas/renderer';
 import { hitTestNode, nodesInRect } from '../canvas/hitTesting';
 import { visibleWorldRect } from '../canvas/coordinateTransforms';
 import { TextLayoutCache } from '../canvas/textLayout';
 import { fonts } from '../canvas/theme';
-import { MAX_CHILDREN_PER_NODE } from './types';
+import { displayTitle } from './displayTitle';
+import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH, type Point } from './types';
 import type { Camera } from '../canvas/camera';
 import type { GraphDocument } from './types';
 
@@ -165,4 +166,87 @@ describe('per-frame work on a 5,000-node canvas', () => {
     }
     expect(shared).toBe(4999);
   });
+
+  /**
+   * jsdom has no rasteriser and every canvas operation is a Proxy trap, so the
+   * frames below are orders of magnitude dearer than in a browser. The useful
+   * invariant is therefore cost per *drawn window*, not a frame rate: the
+   * renderer must do work proportional to what is on screen. An O(N) scan
+   * hidden inside a per-window draw — as child counting and source-highlight
+   * collection once were — pushes this past 0.7ms per window on this document,
+   * while the indexed paths measure ~0.01ms (labels) and ~0.06ms (full text).
+   */
+  function steadyFrame(zoom: number, passes: number): { perFrame: number; drawn: number } {
+    const renderer = new GraphRenderer();
+    const camera: Camera = { x: 0, y: 0, zoom };
+    const frame = {
+      doc,
+      camera,
+      viewport: { width: 1600, height: 900 },
+      draftPositions: new Map<string, Point>(),
+      selectedIds: new Set<string>(),
+      hoveredId: null,
+      editingNodeId: null,
+      marquee: null,
+      index: grid,
+      now: 1000,
+    };
+    // Warm: first paint builds wrapped-text layouts and derived titles.
+    renderer.draw(createNoopContext(), frame);
+    const started = performance.now();
+    for (let pass = 0; pass < passes; pass += 1) renderer.draw(createNoopContext(), frame);
+    return { perFrame: (performance.now() - started) / passes, drawn: renderer.stats.drawnNodes };
+  }
+
+  it('labels a zoomed-out frame in O(visible), with cached labels', () => {
+    // Below the text tier each window is one derived title (memoised on node
+    // identity) plus up to two cached preview lines — no skeleton bars, and no
+    // measurement once the ellipsis cache is warm.
+    const { perFrame, drawn } = steadyFrame(0.3, 20);
+    report('title+preview frame, 5,000 nodes', perFrame);
+    console.log(`      … per drawn window: ${(perFrame / Math.max(1, drawn)).toFixed(3)}ms`);
+
+    expect(drawn).toBeGreaterThan(0);
+    // Culling: only what is on screen is painted.
+    expect(drawn).toBeLessThan(5000);
+    expect(perFrame / Math.max(1, drawn)).toBeLessThan(0.15);
+  });
+
+  it('draws full-text windows without scanning the document per window', () => {
+    // The text tier paints the most per window, so any accidental whole-document
+    // walk (branch counts, descendant source-range scans) dominates here first.
+    const { perFrame, drawn } = steadyFrame(0.5, 8);
+    report('full-text frame, 5,000 nodes', perFrame);
+    console.log(`      … per drawn window: ${(perFrame / Math.max(1, drawn)).toFixed(3)}ms`);
+
+    expect(drawn).toBeGreaterThan(0);
+    expect(perFrame / Math.max(1, drawn)).toBeLessThan(0.35);
+  });
+
+  it('derives a display title from only the leading slice of a note', () => {
+    const node = Object.values(doc.nodes)[100];
+    if (!node) throw new Error('no node');
+    const huge = { ...node, title: '', content: 'x'.repeat(MAX_NODE_CONTENT_LENGTH) };
+    const started = performance.now();
+    for (let pass = 0; pass < 200; pass += 1) {
+      // A fresh object each time defeats the identity memo, so this measures the
+      // derivation itself: the 2,000-character inspection cap must hold.
+      displayTitle({ ...huge });
+    }
+    const perCall = (performance.now() - started) / 200;
+    report('title derivation, 20,000-char note', perCall);
+    expect(perCall).toBeLessThan(1);
+  });
 });
+
+/** Minimal 2D context for renderer timing; jsdom has no rasteriser. */
+function createNoopContext(): CanvasRenderingContext2D {
+  const noop = (): undefined => undefined;
+  return new Proxy({} as CanvasRenderingContext2D, {
+    get: (_target, property) => {
+      if (property === 'measureText') return (text: string) => ({ width: text.length * 7 });
+      return noop;
+    },
+    set: () => true,
+  });
+}

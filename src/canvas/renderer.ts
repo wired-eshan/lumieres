@@ -15,7 +15,13 @@
 
 import { MAX_CHILDREN_PER_NODE, MAX_NODE_CONTENT_LENGTH } from '../config';
 import type { GraphDocument, NodeId, Point, Rect, WindowSize } from '../graph/types';
-import { compareRenderOrder, getNode, evaluateSourceReference } from '../graph/graphOperations';
+import {
+  compareRenderOrder,
+  evaluateSourceReference,
+  getChildCount,
+  getNode,
+} from '../graph/graphOperations';
+import { displayTitle } from '../graph/displayTitle';
 import { collectBodySourceRanges } from '../graph/sourceHighlights';
 import {
   BODY_LINE_HEIGHT,
@@ -32,8 +38,8 @@ import { clamp } from '../utils/misc';
 import { visibleWorldRect } from './coordinateTransforms';
 import type { Camera, Viewport } from './camera';
 import type { SpatialGrid } from './spatialIndex';
-import { ellipsize, rangeToLineSpans, textLayoutCache, measureTextWidth } from './textLayout';
-import { fonts, palette, zoomTier } from './theme';
+import { ellipsize, ellipsizeCached, rangeToLineSpans, textLayoutCache, measureTextWidth } from './textLayout';
+import { canvasFont, fonts, palette, zoomTier } from './theme';
 
 export interface RenderFrame {
   doc: GraphDocument;
@@ -60,6 +66,42 @@ export interface RenderFrame {
 
 const CULL_PADDING = 240;
 const PULSE_DURATION = 1100;
+
+/**
+ * Low-zoom label geometry, in **screen pixels**. Windows narrower or shorter
+ * than these are drawn as plain blocks: a label there would be a grey smear,
+ * and skipping it is what keeps extreme zoom-out cheap.
+ */
+const LOW_ZOOM_LABEL_MIN_WIDTH = 52;
+const LOW_ZOOM_LABEL_MIN_HEIGHT = 24;
+/** Title size at the screen-size floor, and the ceiling for a large window. */
+const LOW_ZOOM_TITLE_FONT = 10;
+const LOW_ZOOM_TITLE_FONT_MAX = 13;
+const LOW_ZOOM_BODY_FONT = 10;
+
+/**
+ * Title font size in screen pixels for a window of `screenHeight`, growing with
+ * the window up to a cap so a large focused window does not turn into a banner.
+ */
+function lowZoomFontSize(screenHeight: number): number {
+  return clamp(LOW_ZOOM_TITLE_FONT + (screenHeight - 120) * 0.02, LOW_ZOOM_TITLE_FONT, LOW_ZOOM_TITLE_FONT_MAX);
+}
+
+/** Side padding in screen pixels; wider open windows get a little more air. */
+function lowZoomPadding(zoom: number): number {
+  return Math.round(clamp(10 * zoom, 4, 10));
+}
+
+/**
+ * Vertical centre of the title line for a window of `screenHeight`.
+ *
+ * Anchored near the top, inside the header band, so zooming across the text
+ * tier does not make the title jump down the window. `min(centre, …)` keeps the
+ * label inside a short collapsed block.
+ */
+function lowZoomTitleY(screenHeight: number, fontSize: number, padding: number): number {
+  return Math.min(screenHeight / 2, padding + fontSize * 0.8);
+}
 
 export function nodeRectAt(
   position: Point,
@@ -121,7 +163,7 @@ export class GraphRenderer {
     if (camera.zoom < zoomTier.structure) {
       // Extreme zoom-out: paint the topology only. Individual windows would be
       // sub-pixel; the structure is what matters at this scale.
-      this.drawStructuralOverview(ctx, frame, visibleWorld);
+      this.drawStructuralOverview(ctx, frame, visibleWorld, visibleIds);
     } else {
       this.drawEdges(ctx, frame, visibleIds);
       this.drawNodes(ctx, frame, visibleIds);
@@ -186,11 +228,15 @@ export class GraphRenderer {
     ctx: CanvasRenderingContext2D,
     frame: RenderFrame,
     visible: Rect,
+    visibleIds: ReadonlySet<NodeId>,
   ): void {
     const { camera } = frame;
     ctx.fillStyle = palette.edge;
-    for (const node of Object.values(frame.doc.nodes)) {
-      const rect = this.rectFor(frame, node.id);
+    // Iterate the already-computed cull set, not the whole document. The old
+    // full scan rect-tested every node per frame at exactly the zoom level a
+    // large canvas uses to navigate; this keeps the tier O(visible).
+    for (const id of visibleIds) {
+      const rect = this.rectFor(frame, id);
       if (!rect) continue;
       if (
         rect.x + rect.width < visible.x ||
@@ -367,7 +413,8 @@ export class GraphRenderer {
       ctx.stroke();
 
       if (showText) this.drawNodeContent(ctx, frame, node.id, rect, isRoot);
-      else this.drawNodePlaceholder(ctx, rect);
+      else if (camera.zoom >= zoomTier.title) this.drawNodePreview(ctx, frame, node.id, rect);
+      else this.drawNodeTitleOnly(ctx, frame, node.id, rect);
 
       // The selected, non-open window advertises the same corner-resize gesture
       // the editor overlay offers with its DOM handle.
@@ -398,14 +445,138 @@ export class GraphRenderer {
     }
   }
 
-  private drawNodePlaceholder(ctx: CanvasRenderingContext2D, rect: Rect): void {
-    ctx.fillStyle = palette.gridBold;
-    const lineWidth = rect.width - NODE_CONTENT_PADDING * 2;
-    let y = NODE_HEADER_HEIGHT + 18;
-    while (y < rect.height - NODE_FOOTER_HEIGHT - 6) {
-      ctx.fillRect(NODE_CONTENT_PADDING, y, lineWidth * (y % 3 === 0 ? 1 : 0.72), 5);
-      y += 14;
+  /**
+   * Middle tier, `zoomTier.title` ≤ zoom < `zoomTier.text`: a screen-legible
+   * title plus the first couple of body lines.
+   *
+   * The canvas transform is scaled by the camera here, so drawing at world font
+   * sizes would produce a 3–5 px smudge. Undoing the scale and painting in
+   * screen pixels instead is what makes the label readable at *any* zoom — the
+   * same trick map renderers use. Cost is bounded: one cached wrap of a short
+   * preview plus up to three cached ellipsizes, and text is skipped entirely
+   * for windows narrower than `LOW_ZOOM_LABEL_MIN_WIDTH`.
+   */
+  private drawNodePreview(
+    ctx: CanvasRenderingContext2D,
+    frame: RenderFrame,
+    nodeId: NodeId,
+    rect: Rect,
+  ): void {
+    const node = frame.doc.nodes[nodeId];
+    if (!node) return;
+    ctx.save();
+    // From here on, one unit is one CSS pixel at the node's top-left corner.
+    ctx.scale(1 / frame.camera.zoom, 1 / frame.camera.zoom);
+    const width = rect.width * frame.camera.zoom;
+    const height = rect.height * frame.camera.zoom;
+    if (!this.paintLowZoomLabel(ctx, frame, nodeId, width, height)) {
+      ctx.restore();
+      return;
     }
+    if (node.collapsed) {
+      ctx.restore();
+      return;
+    }
+
+    const titleSize = lowZoomFontSize(height);
+    const padding = lowZoomPadding(frame.camera.zoom);
+    const bodySize = Math.max(LOW_ZOOM_BODY_FONT - 1, titleSize - 2);
+    const bodyFont = canvasFont(400, bodySize);
+    const bodyWidth = Math.max(1, width - padding * 2);
+    const bodyTop = lowZoomTitleY(height, titleSize, padding) + titleSize * 0.9;
+    const availableLines = Math.max(
+      0,
+      Math.floor((height - bodyTop - padding) / (bodySize * 1.35)),
+    );
+    // The footer band is not drawn at this tier, but the bottom of the window
+    // is still a hard boundary; `availableLines` already respects it.
+    const maxLines = Math.min(2, availableLines);
+    if (maxLines > 0) {
+      const previewText = notePreviewText(node);
+      if (previewText.length > 0) {
+        const layout = textLayoutCache.get(
+          `preview:${nodeId}`,
+          previewText,
+          bodyFont,
+          bodyWidth,
+          maxLines,
+        );
+        ctx.font = bodyFont;
+        ctx.fillStyle = palette.textMuted;
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < layout.lines.length; i += 1) {
+          const line = layout.lines[i];
+          if (line === undefined) continue;
+          const text =
+            i === layout.lines.length - 1 && layout.clipped ? `${line} …` : line;
+          ctx.fillText(text, padding, bodyTop + i * bodySize * 1.35);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Overview tier, `zoomTier.structure` ≤ zoom < `zoomTier.title`: the title
+   * alone, in screen space, on the window block (B1 + B2a). Replaces the old
+   * skeleton bars — one cached `ellipsize` and one `fillText` per window is
+   * *cheaper* than the ~11 `fillRect`s it replaces, while answering the only
+   * question this zoom level can answer: which window holds what.
+   */
+  private drawNodeTitleOnly(
+    ctx: CanvasRenderingContext2D,
+    frame: RenderFrame,
+    nodeId: NodeId,
+    rect: Rect,
+  ): void {
+    ctx.save();
+    ctx.scale(1 / frame.camera.zoom, 1 / frame.camera.zoom);
+    this.paintLowZoomLabel(ctx, frame, nodeId, rect.width * frame.camera.zoom, rect.height * frame.camera.zoom);
+    ctx.restore();
+  }
+
+  /**
+   * Paints a title sized for the screen, clipped to the window's block. Returns
+   * false when the window is too small to carry a legible label at all.
+   */
+  private paintLowZoomLabel(
+    ctx: CanvasRenderingContext2D,
+    frame: RenderFrame,
+    nodeId: NodeId,
+    width: number,
+    height: number,
+  ): boolean {
+    // Below the readable-width threshold a label degenerates into a grey smear;
+    // the tinted block alone identifies the window better. This is what keeps a
+    // 5,000-node canvas from spending text draws on sub-pixel windows.
+    if (width < LOW_ZOOM_LABEL_MIN_WIDTH || height < LOW_ZOOM_LABEL_MIN_HEIGHT) return false;
+    const node = frame.doc.nodes[nodeId];
+    if (!node) return false;
+    const title = displayTitle(node);
+    const label =
+      title.length > 0
+        ? title
+        : node.kind === 'ai'
+          ? 'Untitled conversation'
+          : 'Untitled note';
+    const size = lowZoomFontSize(height);
+    const padding = lowZoomPadding(frame.camera.zoom);
+    const font = canvasFont(600, size);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(1, 1, Math.max(0, width - 2), Math.max(0, height - 2));
+    ctx.clip();
+    ctx.font = font;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = title.length > 0 ? palette.text : palette.textFaint;
+    ctx.fillText(
+      ellipsizeCached(label, font, Math.max(1, width - padding * 2)),
+      padding,
+      lowZoomTitleY(height, size, padding),
+    );
+    ctx.restore();
+    return true;
   }
 
   private drawNodeContent(
@@ -423,15 +594,17 @@ export class GraphRenderer {
     let cursorY: number;
     const isAi = node.kind === 'ai';
 
-    // Title
-    const titleText = node.title.trim();
+    // Title. A window with no stored title shows a derived one (first chat
+    // turn, else extractive from the body) without rewriting the document —
+    // see `graph/displayTitle`.
+    const titleText = displayTitle(node);
     const titleFont = fonts.title;
     ctx.font = titleFont;
     ctx.fillStyle = titleText.length > 0 ? palette.text : palette.textFaint;
     ctx.textBaseline = 'middle';
     const badgeSpace = isAi && !node.collapsed ? 30 : 0;
-    const titleLabel = ellipsize(
-      titleText.length > 0 ? titleText : 'Untitled note',
+    const titleLabel = ellipsizeCached(
+      titleText.length > 0 ? titleText : isAi ? 'Untitled conversation' : 'Untitled note',
       titleFont,
       contentWidth - 6 - badgeSpace,
     );
@@ -446,7 +619,7 @@ export class GraphRenderer {
     cursorY = NODE_HEADER_HEIGHT;
 
     if (node.collapsed) {
-      const childCount = countChildren(doc, node.id);
+      const childCount = getChildCount(doc, node.id);
       ctx.font = fonts.label;
       ctx.fillStyle = palette.textFaint;
       ctx.textAlign = 'right';
@@ -586,7 +759,7 @@ export class GraphRenderer {
       );
     }
 
-    const children = countChildren(doc, nodeId);
+    const children = getChildCount(doc, nodeId);
     if (children > 0) {
       ctx.textAlign = 'right';
       ctx.fillStyle = children >= MAX_CHILDREN_PER_NODE ? palette.warning : palette.textFaint;
@@ -737,10 +910,18 @@ function measureLabel(ctx: CanvasRenderingContext2D, text: string): number {
   return width;
 }
 
-function countChildren(doc: GraphDocument, id: NodeId): number {
-  let count = 0;
-  for (const node of Object.values(doc.nodes)) if (node.parentId === id) count += 1;
-  return count;
+/**
+ * Text shown under the title at the preview tier: the note body, or the most
+ * recent assistant turn for a conversation (the user already knows what they
+ * asked; the answer is what identifies the window).
+ */
+function notePreviewText(node: GraphDocument['nodes'][NodeId]): string {
+  if (node.kind === 'note') return node.content;
+  for (let index = node.chat.length - 1; index >= 0; index -= 1) {
+    const message = node.chat[index];
+    if (message?.role === 'assistant' && message.content.trim().length > 0) return message.content;
+  }
+  return node.content;
 }
 
 /**

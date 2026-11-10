@@ -7,7 +7,7 @@
  * values are owned by `src/config.ts`.
  */
 
-import { DETAIL_LOD_ZOOM, STRUCTURE_LOD_ZOOM, TEXT_LOD_ZOOM } from '../config';
+import { DETAIL_LOD_ZOOM, STRUCTURE_LOD_ZOOM, TEXT_LOD_ZOOM, TITLE_LOD_ZOOM } from '../config';
 
 export const palette = {
   background: '#0a0c11',
@@ -55,16 +55,33 @@ export const palette = {
   branchChipFill: 'rgba(201,138,47,0.14)',
 } as const;
 
+export const FONT_FAMILY =
+  'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
 export const fonts = {
-  title: `600 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
-  body: `400 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
-  label: `500 11px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`,
+  title: `600 14px ${FONT_FAMILY}`,
+  body: `400 13px ${FONT_FAMILY}`,
+  label: `500 11px ${FONT_FAMILY}`,
   mono: `400 11px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace`,
 } as const;
 
+/**
+ * A font string at an arbitrary size. Low-zoom labels use this to keep text at
+ * a readable *screen* size: the canvas is scaled by the camera, so a larger
+ * world font size is what produces a legible label when zoomed out.
+ */
+export function canvasFont(weight: number, sizePx: number): string {
+  return `${weight} ${Math.round(sizePx * 100) / 100}px ${FONT_FAMILY}`;
+}
+
 export const zoomTier = {
-  /** Below this, text is replaced by placeholder blocks. */
+  /** Above this, windows show their full body text. */
   text: TEXT_LOD_ZOOM,
+  /**
+   * Between `title` and `text`, windows show a title plus a short body preview.
+   * Below `title` (and above `structure`) they show the title alone.
+   */
+  title: TITLE_LOD_ZOOM,
   /** Below this, node shadows and inner detail are skipped. */
   detail: DETAIL_LOD_ZOOM,
   /** Below this, only edges and outlines are painted. */
